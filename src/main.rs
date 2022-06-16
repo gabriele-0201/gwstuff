@@ -30,6 +30,12 @@ default_environment!(Env,
     ],
 );
 
+struct Color {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
     Configure { width: u32, height: u32 },
@@ -116,6 +122,7 @@ impl Surface {
         let (canvas, buffer) =
             self.pool.buffer(width, height, stride, wl_shm::Format::Argb8888).unwrap();
 
+        // TODO function for background
         // BACKGROUND
         for dst_pixel in canvas.chunks_exact_mut(4) {
             let pixel = 0xff00ff00u32.to_ne_bytes();
@@ -126,73 +133,14 @@ impl Surface {
         }
 
         //draw_line(canvas, (width as u32, height as u32), (50, 10), (100, 200), 2, (155, 0, 0));
+        let (font, scale) = load_font_and_scale("Arial", 100.0);
 
-        // LOAD FONT
-	    let property = system_fonts::FontPropertyBuilder::new().family("Arial").monospace().build();
-	    let (font_data, _) = system_fonts::get(&property).unwrap();
+        let text = vec!["ciao", "bello", "giuliooo" ];
 
+        let init_x: &mut f32 = &mut 10.0;
+        let init_y: &mut f32 = &mut 10.0;
 
-        // TEST RUSTTYPE
-        
-        let font = Font::try_from_vec(font_data).unwrap_or_else(|| {
-            panic!( "error constructing a Font from data at");
-        });
-
-        // Desired font pixel height
-        let pt_font = 15.0;
-        let px_font = (pt_font / 72.0) * 96.0;
-
-        let height: f32 = px_font; // to get 80 chars across (fits most terminals); adjust as desired
-                                
-        let pixel_height = height.ceil() as usize;
-
-        // 2x scale in x direction to counter the aspect ratio of monospace characters.
-        let scale = Scale::uniform(50.0);
-
-        let v_metrics = font.v_metrics(scale);
-        let offset = point(0.0, v_metrics.ascent);
-
-        // Glyphs to draw for "RustType". Feel free to try other strings.
-        let glyphs: Vec<_> = font.layout("proviaml", scale, offset).collect();
-
-        // Find the most visually pleasing width to display
-        let width = glyphs
-            .iter()
-            .rev()
-            .map(|g| g.position().x as f32 + g.unpositioned().h_metrics().advance_width)
-            .next()
-            .unwrap_or(0.0)
-            .ceil() as usize;
-
-        println!("width: {}, height: {}", width, pixel_height);
-
-        // Rasterise directly into ASCII art.
-        //let mut pixel_data = vec![b'@'; width * pixel_height];
-        //let mapping = b"@%#x+=:-. "; // The approximation of greyscale
-        //let mapping_scale = (mapping.len() - 1) as f32;
-        for g in glyphs {
-            if let Some(bb) = g.pixel_bounding_box() {
-                g.draw(|x, y, v| {
-                    
-                    // v should be in the range 0.0 to 1.0
-                    let x = x as i32 + bb.min.x;
-                    let y = y as i32 + bb.min.y;
-                    // There's still a possibility that the glyph clips the boundaries of the bitmap
-                    if x >= 0 && x < width as i32 && y >= 0 && y < /*pixel_height*/scale.y as i32 && v >= 0.01 {
-                        let x = x as usize;
-                        let y = y as usize;
-
-                        let pixel = to_pixel(255, 0, 0, (v * 255.0) as u32);
-                        let pixel_canvas = canvas.chunks_exact_mut(4).nth(x + (y * width_win as usize)).unwrap();
-
-                        pixel_canvas[0] = pixel[0];
-                        pixel_canvas[1] = pixel[1];
-                        pixel_canvas[2] = pixel[2];
-                        pixel_canvas[3] = pixel[3];
-                     }
-                })
-            }
-        }
+        draw_text(canvas, (init_x, init_y), self.dimensions.0 as f32, &font, &scale, &text, 0.0, Color { r: 255, g: 0, b: 0 });
 
         //draw_text(canvas, (&mut x_init, &mut y_init), &font, 14.0, &text, 0.0, 5.0, (height as u32, width as u32));
 
@@ -203,6 +151,76 @@ impl Surface {
         // Finally, commit the surface
         self.surface.commit();
     }
+}
+
+// TODO calc properly scale - and font type
+fn load_font_and_scale(font_name: &str, font_size: f32) -> (Font, Scale) {
+    
+    // LOAD FONT
+    let property = system_fonts::FontPropertyBuilder::new().family(font_name).build();
+    let (font_data, _) = system_fonts::get(&property).unwrap();
+    
+    // TEST RUSTTYPE
+    let font = Font::try_from_vec(font_data).unwrap_or_else(|| {
+        panic!( "error constructing a Font from data at");
+    });
+    
+    // FONT LOAD + SCALE DIMENSION
+    /*
+    let px_font = (font_size / 72.0) * 96.0;
+    let height: f32 = px_font; // to get 80 chars across (fits most terminals); adjust as desired
+    */
+                            
+    let scale = Scale::uniform(font_size);
+
+    (font, scale)
+}
+
+fn draw_text(canvas : &mut [u8], (init_x, init_y): (&mut f32, &mut f32), width_win: f32, font: &Font, scale: &Scale, text: &Vec<&str>, intra_line: f32, color: Color) {
+
+        let v_metrics = font.v_metrics(*scale);
+        for line in text {
+
+            let offset = point(*init_y * width_win + *init_x, v_metrics.ascent);
+
+            let glyphs: Vec<_> = font.layout(line, *scale, offset).collect();
+
+            // Find the most visually pleasing width to display
+            let width_line = glyphs
+                .iter()
+                .rev()
+                .map(|g| g.position().x as f32 + g.unpositioned().h_metrics().advance_width)
+                .next()
+                .unwrap_or(0.0)
+                .ceil() as usize;
+
+            for g in glyphs {
+                if let Some(bb) = g.pixel_bounding_box() {
+                    g.draw(|x, y, v| {
+                        
+                        // v should be in the range 0.0 to 1.0
+                        let x = x as i32 + bb.min.x;
+                        let y = y as i32 + bb.min.y;
+                        // There's still a possibility that the glyph clips the boundaries of the bitmap
+                        if x >= 0 && x < width_line as i32 && y >= 0 && y < scale.y as i32 && v >= 0.01 {
+                            let x = x as usize;
+                            let y = y as usize;
+
+                            let pixel = to_pixel(color.r, color.g, color.b, (v * 255.0).floor() as u8);
+                            let pixel_canvas = canvas.chunks_exact_mut(4).nth(x + (y * width_win as usize)).unwrap();
+
+                            pixel_canvas[0] = pixel[0];
+                            pixel_canvas[1] = pixel[1];
+                            pixel_canvas[2] = pixel[2];
+                            pixel_canvas[3] = pixel[3];
+                         }
+                    })
+                }
+            }
+
+            *init_y += intra_line + scale.y;
+        }
+
 }
 
 /*
@@ -336,8 +354,8 @@ fn draw_letter(letter: char, canvas : &mut [u8], scaled_font: &PxScaleFont<&Font
 }
 */
 
-fn to_pixel(r: u32, g: u32, b: u32, t: u32) -> [u8; 4] {
-    ((t << 24) + (r << 16) + (g << 8) + b).to_ne_bytes()
+fn to_pixel(r: u8, g: u8, b: u8, t: u8) -> [u8; 4] {
+    (((t as u32) << 24) + ((r as u32) << 16) + ((g as u32) << 8) + (b as u32)).to_ne_bytes()
 }
 
 fn length ((x, y): (f32, f32)) -> f32 {
@@ -359,6 +377,7 @@ impl ops::Mul<f32> for (f32, f32) {
 }
 */
 
+/*
 fn draw_line(canvas : &mut [u8], (buf_x, buf_y): (u32, u32), (x_init, y_init): (u32, u32),(x_end, y_end): (u32, u32), thikness: u32, (r, g, b): (u32, u32, u32)) {
 
     //println!("dim x: {}", buf_x);
@@ -419,6 +438,7 @@ fn draw_line(canvas : &mut [u8], (buf_x, buf_y): (u32, u32), (x_init, y_init): (
         }
     }
 }
+*/
 
 impl Drop for Surface {
     fn drop(&mut self) {

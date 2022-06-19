@@ -6,7 +6,7 @@
 
 MVP: 
 
-+ [ ] layer alignment
++ [ ] layer alignment -> WIP
 + [ ] text from line arguments
 + [ ] Line text alignment
 + [ ] Font Scaling

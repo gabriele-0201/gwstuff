@@ -57,18 +57,35 @@ impl Surface {
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: AutoMemPool,
         dimensions: (u32, u32),
+        win_dimensions: (u32, u32), // TODO
+        position: (Position, Position), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
+        margins: (u8, u8) // margin %
     ) -> Self {
+
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
-            Some(output),
+            //Some(output),
+            None, // only monitor recently used
             zwlr_layer_shell_v1::Layer::Overlay,
-            "example".to_owned(),
+            "gwstuff".to_owned(),
         );
 
         layer_surface.set_size(dimensions.0, dimensions.1);
-        // Anchor to the top left corner of the output
+        
+        // Anchor 
         layer_surface
             .set_anchor(zwlr_layer_surface_v1::Anchor::Top | zwlr_layer_surface_v1::Anchor::Left);
+
+        let calc_px_margin = |val: u32, tot: u32| (((val * tot) / 100) as i32);
+
+        let vertical_margin_px = calc_px_margin(10, win_dimensions.1);
+        let horizontal_margin_px = calc_px_margin(10, win_dimensions.0);
+
+        println!("{}, {}", vertical_margin_px, horizontal_margin_px);
+
+        // top, right, bottom, left
+        layer_surface
+            .set_margin(vertical_margin_px, 0, 0, horizontal_margin_px);
 
         let next_render_event = Rc::new(Cell::new(None::<RenderEvent>));
         let next_render_event_handle = Rc::clone(&next_render_event);
@@ -185,6 +202,8 @@ fn draw_text(canvas : &mut [u8], (init_x, init_y): (&mut f32, &mut f32), width_w
 
             let glyphs: Vec<_> = font.layout(line, *scale, offset).collect();
 
+            // println!("{:?}", glyphs);
+
             // Find the most visually pleasing width to display
             let width_line = glyphs
                 .iter()
@@ -193,6 +212,8 @@ fn draw_text(canvas : &mut [u8], (init_x, init_y): (&mut f32, &mut f32), width_w
                 .next()
                 .unwrap_or(0.0)
                 .ceil() as usize;
+
+            //println!("{:?}", width_line);
 
             for g in glyphs {
                 if let Some(bb) = g.pixel_bounding_box() {
@@ -448,6 +469,9 @@ impl Drop for Surface {
 }
 
 fn main() {
+
+    // Take from line argument the text and render the glyph + screen size
+    
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
             .expect("Initial roundtrip failed!");
@@ -459,6 +483,18 @@ fn main() {
     let env_handle = env.clone();
     let surfaces_handle = Rc::clone(&surfaces);
     let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo| {
+
+
+        let mut win_dim: (u32, u32) = (0, 0);
+        for &mode in info.modes.iter() {
+            if mode.is_current {
+                win_dim = (mode.dimensions.0 as u32, mode.dimensions.1 as u32);
+            }
+        }
+
+        //println!("{:?}", info.modes);
+        //println!("{:?}", win_dim);
+
         if info.obsolete {
             // an output has been removed, release it
             surfaces_handle.borrow_mut().retain(|(i, _)| *i != info.id);
@@ -468,7 +504,7 @@ fn main() {
             let surface = env_handle.create_surface().detach();
             let pool = env_handle.create_auto_pool().expect("Failed to create a memory pool!");
             (*surfaces_handle.borrow_mut())
-                .push((info.id, Surface::new(&output, surface, &layer_shell.clone(), pool, (512, 512))));
+                .push((info.id, Surface::new(&output, surface, &layer_shell.clone(), pool, (512, 512), win_dim)));
         }
     };
 
@@ -487,8 +523,6 @@ fn main() {
     let mut event_loop = calloop::EventLoop::<()>::try_new().unwrap();
 
     WaylandSource::new(queue).quick_insert(event_loop.handle()).unwrap();
-
-
 
     loop {
         // This is ugly, let's hope that some version of drain_filter() gets stabilized soon

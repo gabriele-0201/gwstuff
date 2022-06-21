@@ -50,7 +50,7 @@ struct Surface {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    position: (parser::Placement, parser::Placement), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
+    position: (parser::Placement, parser::Placement), // Top - Left - Bottom - Right - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
     margins: (u8, u8) // margin %
 }
 
@@ -62,7 +62,7 @@ impl Surface {
         pool: AutoMemPool,
         dimensions: (u32, u32),
         display_dimensions: (u32, u32), // TODO
-        position: (parser::Placement, parser::Placement), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
+        position: (parser::Placement, parser::Placement), // Top - Left - Bottom - Right - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
         margins: (u8, u8) // margin %
     ) -> Self {
 
@@ -75,6 +75,9 @@ impl Surface {
         );
 
         layer_surface.set_size(dimensions.0, dimensions.1);
+
+        // 4, 8, 1, 2
+        println!("{:?}", (zwlr_layer_surface_v1::Anchor::Left.to_raw(), zwlr_layer_surface_v1::Anchor::Right.to_raw(), zwlr_layer_surface_v1::Anchor::Top.to_raw(), zwlr_layer_surface_v1::Anchor::Bottom.to_raw()));
 
         // Anchor
         layer_surface
@@ -172,65 +175,6 @@ impl Surface {
         // Finally, commit the surface
         self.surface.commit();
     }
-}
-
-
-fn position_to_anchor(position: (parser::Placement, parser::Placement)) -> zwlr_layer_surface_v1::Anchor{
-    let mut anchor: Option<zwlr_layer_surface_v1::Anchor> = None;
-
-    for pos in [position.0, position.1].iter(){
-        match pos{
-                parser::Placement::CENTER_HORIZONTAL => {
-                    if let Some(mut val) = anchor{
-                        val |= zwlr_layer_surface_v1::Anchor::Left | zwlr_layer_surface_v1::Anchor::Right;
-                    }
-                    else{
-                        anchor = Some(zwlr_layer_surface_v1::Anchor::Left | zwlr_layer_surface_v1::Anchor::Right);
-                    }
-                },
-                parser::Placement::CENTER_VERTICAL => {
-                    if let Some(mut val) = anchor{
-                        val |= zwlr_layer_surface_v1::Anchor::Top| zwlr_layer_surface_v1::Anchor::Bottom;
-                    }
-                    else{
-                        anchor = Some(zwlr_layer_surface_v1::Anchor::Top| zwlr_layer_surface_v1::Anchor::Bottom);
-                    }
-                },
-                parser::Placement::LEFT => {
-                    if let Some(mut val) = anchor{
-                        val |= zwlr_layer_surface_v1::Anchor::Left;
-                    }
-                    else{
-                        anchor = Some(zwlr_layer_surface_v1::Anchor::Left);
-                    }
-                },
-                parser::Placement::RIGHT => {
-                    if let Some(mut val) = anchor{
-                        val |= zwlr_layer_surface_v1::Anchor::Right;
-                    }
-                    else{
-                        anchor = Some(zwlr_layer_surface_v1::Anchor::Right);
-                    }
-                },
-                parser::Placement::TOP => {
-                    if let Some(mut val) = anchor{
-                        val |= zwlr_layer_surface_v1::Anchor::Top;
-                    }
-                    else{
-                        anchor = Some(zwlr_layer_surface_v1::Anchor::Top);
-                    }
-                },
-                parser::Placement::BOTTOM => {
-                    if let Some(mut val) = anchor{
-                        val |= zwlr_layer_surface_v1::Anchor::Bottom;
-                    }
-                    else{
-                        anchor = Some(zwlr_layer_surface_v1::Anchor::Bottom);
-                    }
-                },
-        }
-    }
-    anchor.unwrap()
 }
 
 // TODO calc properly scale - and font type
@@ -566,7 +510,7 @@ fn main() {
             win_position = pos;
         }
         else{
-            win_position = (parser::Placement::CENTER_HORIZONTAL, parser::Placement::CENTER_VERTICAL);
+            win_position = (parser::Placement::CenterHorizontal, parser::Placement::CenterVertical);
         }
 
         if info.obsolete {

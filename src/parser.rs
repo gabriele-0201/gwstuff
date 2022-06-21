@@ -12,12 +12,24 @@ pub struct Config{
 
 #[derive(Debug, Deserialize, Copy, Clone)]
 pub enum Placement{
-    TOP,
-    BOTTOM,
-    LEFT,
-    RIGHT,
-    CENTER_VERTICAL,
-    CENTER_HORIZONTAL,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    CenterVertical,
+    CenterHorizontal,
+}
+impl Placement{
+    pub fn get_raw(self) -> i32{
+        match self{
+            Top => 1,
+            Bottom => 2,
+            Left => 4,
+            Right => 8,
+            Center_vertical => 3,
+            Center_horizontal => 12,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,7 +43,7 @@ pub struct WindowProps{
 impl WindowProps{
     pub fn calc_win_position(&mut self) {
 
-        let mut full_placement = (Placement::CENTER_VERTICAL, Placement::CENTER_HORIZONTAL);
+        let mut full_placement = (Placement::CenterVertical, Placement::CenterHorizontal);
 
         // Get string to remove whitespaces
         let mut position_stripped_spaces: String = self.win_position_str.clone();
@@ -41,12 +53,12 @@ impl WindowProps{
         // Set the properties
         position_stripped_spaces.split(",").for_each(|position| {
             match position{
-                "CENTER_HORIZONTAL" => { full_placement.0 = Placement::CENTER_HORIZONTAL; /*config.window.win_anchor_int |= 0;8*/ },
-                "CENTER_VERTICAL"   => full_placement.1 = Placement::CENTER_VERTICAL,
-                "LEFT"              => full_placement.0 = Placement::LEFT,
-                "RIGHT"             => full_placement.0 = Placement::RIGHT,
-                "TOP"               => full_placement.1 = Placement::TOP,
-                "BOTTOM"            => full_placement.1 = Placement::BOTTOM,
+                "CENTER_HORIZONTAL" => full_placement.0 = Placement::CenterHorizontal,
+                "CENTER_VERTICAL"   => full_placement.1 = Placement::CenterVertical,
+                "Left"              => full_placement.0 = Placement::Left,
+                "Right"             => full_placement.0 = Placement::Right,
+                "Top"               => full_placement.1 = Placement::Top,
+                "Bottom"            => full_placement.1 = Placement::Bottom,
                 _ => ()
             }
         });
@@ -76,8 +88,8 @@ static DEFAULT_CONFIG: &str = r#"
         height = 100
         background_color = 0x262626
 
-        # Possible values are {CENTER_VERTICAL, CENTER_HORIZONTAL, TOP, BOTTOM, LEFT, RIGHT}
-        win_position_str = 'CENTER_VERTICAL, CENTER_HORIZONTAL'
+        # Possible values are {CenterVertical, CenterHorizontal, Top, Bottom, Left, Right}
+        win_position_str = 'CenterVertical, CenterHorizontal'
 
         [margins]
         vertical_percentage   = 10

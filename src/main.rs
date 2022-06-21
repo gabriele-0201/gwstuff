@@ -50,25 +50,26 @@ struct Surface {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    position: (parser::Placement, parser::Placement), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
-    margins: (u8, u8) // margin %
+    //position: (parser::Placement, parser::Placement), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
+    //margins: (u8, u8) // margin %
 }
 
 impl Surface {
     fn new(
-        output: &wl_output::WlOutput,
+        //output: &wl_output::WlOutput,
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: AutoMemPool,
         dimensions: (u32, u32),
         display_dimensions: (u32, u32), // TODO
-        position: (parser::Placement, parser::Placement), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
+        //position: (parser::Placement, parser::Placement), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
+        anchor: zwlr_layer_surface_v1::Anchor,
         margins: (u8, u8) // margin %
     ) -> Self {
 
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
-            //Some(output),
+            //Some(output), // maybe in the future if we are able to specify a monitor
             None, // only recently used monitor
             zwlr_layer_shell_v1::Layer::Overlay,
             "gwstuff".to_owned(),
@@ -76,20 +77,29 @@ impl Surface {
 
         layer_surface.set_size(dimensions.0, dimensions.1);
 
-        // Anchor
-        layer_surface
-            .set_anchor(position_to_anchor(position));
+        if !anchor.contains(zwlr_layer_surface_v1::Anchor::from_raw(0).unwrap()) {
 
-        let calc_px_margin = |val: u32, tot: u32| (((val * tot) / 100) as i32);
+            layer_surface
+                .set_anchor(anchor);
 
-        let vertical_margin_px = calc_px_margin(10, display_dimensions.1);
-        let horizontal_margin_px = calc_px_margin(10, display_dimensions.0);
+            let calc_px_margin = |val: u8, tot: u32| ((val as u32 * tot) / 100) as i32;
 
-        println!("{}, {}", vertical_margin_px, horizontal_margin_px);
+            let horizontal_margin_px = calc_px_margin(margins.0, display_dimensions.0);
+            let vertical_margin_px = calc_px_margin(margins.1, display_dimensions.1);
 
-        // top, right, bottom, left
-        layer_surface
-            .set_margin(vertical_margin_px, 0, 0, horizontal_margin_px);
+            //println!("{}, {}", vertical_margin_px, horizontal_margin_px);
+
+            let get_proper_margin = |a: zwlr_layer_surface_v1::Anchor, val: i32| if anchor.contains(a) { val } else { 0 };
+            // top, right, bottom, left
+            layer_surface
+                .set_margin(
+                    get_proper_margin(zwlr_layer_surface_v1::Anchor::Top, vertical_margin_px),
+                    get_proper_margin(zwlr_layer_surface_v1::Anchor::Right, vertical_margin_px),
+                    get_proper_margin(zwlr_layer_surface_v1::Anchor::Bottom, vertical_margin_px),
+                    get_proper_margin(zwlr_layer_surface_v1::Anchor::Left, horizontal_margin_px),
+                );
+
+        }
 
         let next_render_event = Rc::new(Cell::new(None::<RenderEvent>));
         let next_render_event_handle = Rc::clone(&next_render_event);
@@ -112,7 +122,7 @@ impl Surface {
         surface.commit();
 
         // TODO how this work? Why need (0, 0) in dimensions?
-        Self { surface, layer_surface, next_render_event, pool, dimensions, position, margins }
+        Self { surface, layer_surface, next_render_event, pool, dimensions: (0, 0) }
     }
 
     /// Handles any events that have occurred since the last call, redrawing if needed.
@@ -581,13 +591,13 @@ fn main() {
                 .push(
                     (
                         info.id, Surface::new(
-                                                &output,
+                                                //&output,
                                                 surface,
                                                 &layer_shell.clone(),
                                                 pool,
                                                 (gwstuff_config.window.width, gwstuff_config.window.height),
                                                 display_dim,
-                                                win_position,
+                                                position_to_anchor(win_position),
                                                 (gwstuff_config.margins.horizontal_percentage, gwstuff_config.margins.vertical_percentage),
                                              )
                        )

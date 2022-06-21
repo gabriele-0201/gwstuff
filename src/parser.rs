@@ -20,7 +20,7 @@ pub enum Placement{
     CenterHorizontal,
 }
 impl Placement{
-    pub fn get_raw(self) -> i32{
+    pub fn to_raw(self) -> u32{
         match self{
             Top => 1,
             Bottom => 2,

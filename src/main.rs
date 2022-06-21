@@ -76,7 +76,7 @@ impl Surface {
 
         layer_surface.set_size(dimensions.0, dimensions.1);
 
-        if !anchor.contains(zwlr_layer_surface_v1::Anchor::from_raw(0).unwrap()) {
+        if !anchor.contains(zwlr_layer_surface_v1::Anchor::from_raw(15).unwrap()) {
 
             layer_surface
                 .set_anchor(anchor);
@@ -537,7 +537,7 @@ fn main() {
                                                 pool,
                                                 (gwstuff_config.window.width, gwstuff_config.window.height),
                                                 display_dim,
-                                                position_to_anchor(win_position),
+                                                zwlr_layer_surface_v1::Anchor::from_raw(win_position.0.to_raw() | win_position.1.to_raw()).unwrap(), // TODO remove unwrap
                                                 (gwstuff_config.margins.horizontal_percentage, gwstuff_config.margins.vertical_percentage),
                                              )
                        )

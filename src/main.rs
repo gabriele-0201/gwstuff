@@ -21,6 +21,8 @@ use std::rc::Rc;
 use font_loader::system_fonts;
 use rusttype::{point, Font, Scale};
 
+mod parser;
+
 default_environment!(Env,
     fields = [
         layer_shell: SimpleGlobal<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
@@ -48,6 +50,8 @@ struct Surface {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
+    position: (parser::Placement, parser::Placement), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
+    margins: (u8, u8) // margin %
 }
 
 impl Surface {
@@ -57,29 +61,29 @@ impl Surface {
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: AutoMemPool,
         dimensions: (u32, u32),
-        win_dimensions: (u32, u32), // TODO
-        position: (Position, Position), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
+        display_dimensions: (u32, u32), // TODO
+        position: (parser::Placement, parser::Placement), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
         margins: (u8, u8) // margin %
     ) -> Self {
 
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
             //Some(output),
-            None, // only monitor recently used
+            None, // only recently used monitor
             zwlr_layer_shell_v1::Layer::Overlay,
             "gwstuff".to_owned(),
         );
 
         layer_surface.set_size(dimensions.0, dimensions.1);
-        
-        // Anchor 
+
+        // Anchor
         layer_surface
-            .set_anchor(zwlr_layer_surface_v1::Anchor::Top | zwlr_layer_surface_v1::Anchor::Left);
+            .set_anchor(position_to_anchor(position));
 
         let calc_px_margin = |val: u32, tot: u32| (((val * tot) / 100) as i32);
 
-        let vertical_margin_px = calc_px_margin(10, win_dimensions.1);
-        let horizontal_margin_px = calc_px_margin(10, win_dimensions.0);
+        let vertical_margin_px = calc_px_margin(10, display_dimensions.1);
+        let horizontal_margin_px = calc_px_margin(10, display_dimensions.0);
 
         println!("{}, {}", vertical_margin_px, horizontal_margin_px);
 
@@ -108,7 +112,7 @@ impl Surface {
         surface.commit();
 
         // TODO how this work? Why need (0, 0) in dimensions?
-        Self { surface, layer_surface, next_render_event, pool, dimensions: (0, 0) }
+        Self { surface, layer_surface, next_render_event, pool, dimensions, position, margins }
     }
 
     /// Handles any events that have occurred since the last call, redrawing if needed.
@@ -168,6 +172,65 @@ impl Surface {
         // Finally, commit the surface
         self.surface.commit();
     }
+}
+
+
+fn position_to_anchor(position: (parser::Placement, parser::Placement)) -> zwlr_layer_surface_v1::Anchor{
+    let mut anchor: Option<zwlr_layer_surface_v1::Anchor> = None;
+
+    for pos in [position.0, position.1].iter(){
+        match pos{
+                parser::Placement::CENTER_HORIZONTAL => {
+                    if let Some(mut val) = anchor{
+                        val |= zwlr_layer_surface_v1::Anchor::Left | zwlr_layer_surface_v1::Anchor::Right;
+                    }
+                    else{
+                        anchor = Some(zwlr_layer_surface_v1::Anchor::Left | zwlr_layer_surface_v1::Anchor::Right);
+                    }
+                },
+                parser::Placement::CENTER_VERTICAL => {
+                    if let Some(mut val) = anchor{
+                        val |= zwlr_layer_surface_v1::Anchor::Top| zwlr_layer_surface_v1::Anchor::Bottom;
+                    }
+                    else{
+                        anchor = Some(zwlr_layer_surface_v1::Anchor::Top| zwlr_layer_surface_v1::Anchor::Bottom);
+                    }
+                },
+                parser::Placement::LEFT => {
+                    if let Some(mut val) = anchor{
+                        val |= zwlr_layer_surface_v1::Anchor::Left;
+                    }
+                    else{
+                        anchor = Some(zwlr_layer_surface_v1::Anchor::Left);
+                    }
+                },
+                parser::Placement::RIGHT => {
+                    if let Some(mut val) = anchor{
+                        val |= zwlr_layer_surface_v1::Anchor::Right;
+                    }
+                    else{
+                        anchor = Some(zwlr_layer_surface_v1::Anchor::Right);
+                    }
+                },
+                parser::Placement::TOP => {
+                    if let Some(mut val) = anchor{
+                        val |= zwlr_layer_surface_v1::Anchor::Top;
+                    }
+                    else{
+                        anchor = Some(zwlr_layer_surface_v1::Anchor::Top);
+                    }
+                },
+                parser::Placement::BOTTOM => {
+                    if let Some(mut val) = anchor{
+                        val |= zwlr_layer_surface_v1::Anchor::Bottom;
+                    }
+                    else{
+                        anchor = Some(zwlr_layer_surface_v1::Anchor::Bottom);
+                    }
+                },
+        }
+    }
+    anchor.unwrap()
 }
 
 // TODO calc properly scale - and font type
@@ -471,7 +534,9 @@ impl Drop for Surface {
 fn main() {
 
     // Take from line argument the text and render the glyph + screen size
-    
+
+    let gwstuff_config: parser::Config = parser::init_toml_config(None);
+
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
             .expect("Initial roundtrip failed!");
@@ -485,15 +550,24 @@ fn main() {
     let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo| {
 
 
-        let mut win_dim: (u32, u32) = (0, 0);
+        let mut display_dim: (u32, u32) = (1, 1);
         for &mode in info.modes.iter() {
             if mode.is_current {
-                win_dim = (mode.dimensions.0 as u32, mode.dimensions.1 as u32);
+                display_dim = (mode.dimensions.0 as u32, mode.dimensions.1 as u32);
             }
         }
 
         //println!("{:?}", info.modes);
-        //println!("{:?}", win_dim);
+        //println!("{:?}", display_dim);
+
+        let win_position: (parser::Placement, parser::Placement);
+
+        if let Some(pos) = gwstuff_config.window.win_position {
+            win_position = pos;
+        }
+        else{
+            win_position = (parser::Placement::CENTER_HORIZONTAL, parser::Placement::CENTER_VERTICAL);
+        }
 
         if info.obsolete {
             // an output has been removed, release it
@@ -504,7 +578,20 @@ fn main() {
             let surface = env_handle.create_surface().detach();
             let pool = env_handle.create_auto_pool().expect("Failed to create a memory pool!");
             (*surfaces_handle.borrow_mut())
-                .push((info.id, Surface::new(&output, surface, &layer_shell.clone(), pool, (512, 512), win_dim)));
+                .push(
+                    (
+                        info.id, Surface::new(
+                                                &output,
+                                                surface,
+                                                &layer_shell.clone(),
+                                                pool,
+                                                (gwstuff_config.window.width, gwstuff_config.window.height),
+                                                display_dim,
+                                                win_position,
+                                                (gwstuff_config.margins.horizontal_percentage, gwstuff_config.margins.vertical_percentage),
+                                             )
+                       )
+                    );
         }
     };
 

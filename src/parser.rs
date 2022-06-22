@@ -22,12 +22,12 @@ pub enum Placement{
 impl Placement{
     pub fn to_raw(self) -> u32{
         match self{
-            Top => 1,
-            Bottom => 2,
-            Left => 4,
-            Right => 8,
-            Center_vertical => 3,
-            Center_horizontal => 12,
+            Placement::Top => 1,
+            Placement::Bottom => 2,
+            Placement::Left => 4,
+            Placement::Right => 8,
+            Placement::CenterVertical => 3,
+            Placement::CenterHorizontal => 12,
         }
     }
 }
@@ -44,6 +44,7 @@ impl WindowProps{
     pub fn calc_win_position(&mut self) {
 
         let mut full_placement = (Placement::CenterVertical, Placement::CenterHorizontal);
+
 
         // Get string to remove whitespaces
         let mut position_stripped_spaces: String = self.win_position_str.clone();
@@ -64,6 +65,9 @@ impl WindowProps{
         });
 
         self.win_position = Some(full_placement.clone());
+        
+        println!("{:?}", full_placement.0);
+        println!("{:?}", full_placement.1);
     }
 }
 
@@ -84,12 +88,12 @@ pub struct FontProps{
 
 static DEFAULT_CONFIG: &str = r#"
         [window]
-        width  = 100
-        height = 100
+        width  = 600
+        height = 600
         background_color = 0x262626
 
         # Possible values are {CenterVertical, CenterHorizontal, Top, Bottom, Left, Right}
-        win_position_str = 'CenterVertical, CenterHorizontal'
+        win_position_str = 'CenterVertical, Left'
 
         [margins]
         vertical_percentage   = 10

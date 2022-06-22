@@ -50,8 +50,6 @@ struct Surface {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    //position: (parser::Placement, parser::Placement), // TOP - LEFT - BOTTOM - RIGHT - CENTER_VERTICAL - CENTER_HORIZONTAL : Position
-    //margins: (u8, u8) // margin %
 }
 
 impl Surface {
@@ -76,7 +74,8 @@ impl Surface {
 
         layer_surface.set_size(dimensions.0, dimensions.1);
 
-        if !anchor.contains(zwlr_layer_surface_v1::Anchor::from_raw(15).unwrap()) {
+        // TODO adjust alignment
+        //if !anchor.contains(zwlr_layer_surface_v1::Anchor::from_raw(3 | 12).unwrap()) {
 
             layer_surface
                 .set_anchor(anchor);
@@ -86,10 +85,8 @@ impl Surface {
             let horizontal_margin_px = calc_px_margin(margins.0, display_dimensions.0);
             let vertical_margin_px = calc_px_margin(margins.1, display_dimensions.1);
 
-            //println!("{}, {}", vertical_margin_px, horizontal_margin_px);
-
             let get_proper_margin = |a: zwlr_layer_surface_v1::Anchor, val: i32| if anchor.contains(a) { val } else { 0 };
-            // top, right, bottom, left
+            /*
             layer_surface
                 .set_margin(
                     get_proper_margin(zwlr_layer_surface_v1::Anchor::Top, vertical_margin_px),
@@ -97,8 +94,9 @@ impl Surface {
                     get_proper_margin(zwlr_layer_surface_v1::Anchor::Bottom, vertical_margin_px),
                     get_proper_margin(zwlr_layer_surface_v1::Anchor::Left, horizontal_margin_px),
                 );
+            */
 
-        }
+        //}
 
         let next_render_event = Rc::new(Cell::new(None::<RenderEvent>));
         let next_render_event_handle = Rc::clone(&next_render_event);
@@ -143,7 +141,7 @@ impl Surface {
     fn draw(&mut self) {
         let stride = 4 * self.dimensions.0 as i32;
         let width = self.dimensions.0 as i32;
-        let width_win = self.dimensions.0 as i32;
+        //let width_win = self.dimensions.0 as i32;
         let height = self.dimensions.1 as i32;
 
         // Note: unwrap() is only used here in the interest of simplicity of the example.
@@ -226,8 +224,6 @@ fn draw_text(canvas : &mut [u8], (init_x, init_y): (&mut f32, &mut f32), width_w
                 .unwrap_or(0.0)
                 .ceil() as usize;
 
-            //println!("{:?}", width_line);
-
             for g in glyphs {
                 if let Some(bb) = g.pixel_bounding_box() {
                     g.draw(|x, y, v| {
@@ -251,18 +247,9 @@ fn draw_text(canvas : &mut [u8], (init_x, init_y): (&mut f32, &mut f32), width_w
                     })
                 }
             }
-
             *init_y += intra_line + scale.y;
         }
-
 }
-
-/*
-fn load_font(font_name: &String) -> Result<FontRef, InvalidFont> {
-    // someway I have lo load properly thw font
-    FontRef::try_from_slice(include_bytes!("/usr/share/fonts/adobe-source-code-pro/SourceCodePro-Bold.otf"))
-}
-*/
 
 /*
 fn draw_text(canvas : &mut [u8], (init_x, init_y): (&mut f32, &mut f32), font: &FontRef, pt_size: f32, text: &String, intra_letter: f32, intra_line: f32, (height, width): (u32, u32)) {
@@ -506,9 +493,6 @@ fn main() {
                 display_dim = (mode.dimensions.0 as u32, mode.dimensions.1 as u32);
             }
         }
-
-        //println!("{:?}", info.modes);
-        //println!("{:?}", display_dim);
 
         let win_position: (parser::Placement, parser::Placement);
 

@@ -19,6 +19,13 @@ pub enum Placement{
     CenterVertical,
     CenterHorizontal,
 }
+/*
+ * 00000100
+ * 00000011
+ * 00000111
+ *
+ *
+ * */
 impl Placement{
     pub fn to_raw(self) -> u32{
         match self{
@@ -54,8 +61,8 @@ impl WindowProps{
         // Set the properties
         position_stripped_spaces.split(",").for_each(|position| {
             match position{
-                "CENTER_HORIZONTAL" => full_placement.0 = Placement::CenterHorizontal,
-                "CENTER_VERTICAL"   => full_placement.1 = Placement::CenterVertical,
+                "CenterHorizontal" => full_placement.0 = Placement::CenterHorizontal,
+                "CenterVertical"   => full_placement.1 = Placement::CenterVertical,
                 "Left"              => full_placement.0 = Placement::Left,
                 "Right"             => full_placement.0 = Placement::Right,
                 "Top"               => full_placement.1 = Placement::Top,
@@ -65,9 +72,6 @@ impl WindowProps{
         });
 
         self.win_position = Some(full_placement.clone());
-        
-        println!("{:?}", full_placement.0);
-        println!("{:?}", full_placement.1);
     }
 }
 
@@ -93,11 +97,11 @@ static DEFAULT_CONFIG: &str = r#"
         background_color = 0x262626
 
         # Possible values are {CenterVertical, CenterHorizontal, Top, Bottom, Left, Right}
-        win_position_str = 'CenterVertical, Left'
+        win_position_str = 'Top, Left'
 
         [margins]
-        vertical_percentage   = 10
-        horizontal_percentage = 10
+        vertical_percentage   = 5
+        horizontal_percentage = 5
 
         [font]
         name  = 'Roboto Condensed'

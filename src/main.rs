@@ -17,6 +17,7 @@ use smithay_client_toolkit::{
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::env;
 
 use font_loader::system_fonts;
 use rusttype::{point, Font, Scale};
@@ -50,6 +51,7 @@ struct Surface {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
+    text: Vec<String>,
 }
 
 impl Surface {
@@ -61,7 +63,8 @@ impl Surface {
         dimensions: (u32, u32),
         display_dimensions: (u32, u32), // TODO
         anchor: zwlr_layer_surface_v1::Anchor,
-        margins: (u8, u8) // margin %
+        margins: (u8, u8), // margin %
+        text: Vec<String>,
     ) -> Self {
 
         let layer_surface = layer_shell.get_layer_surface(
@@ -74,8 +77,7 @@ impl Surface {
 
         layer_surface.set_size(dimensions.0, dimensions.1);
 
-        // TODO adjust alignment
-        //if !anchor.contains(zwlr_layer_surface_v1::Anchor::from_raw(3 | 12).unwrap()) {
+        if !anchor.contains(zwlr_layer_surface_v1::Anchor::from_raw(15).unwrap()) {
 
             layer_surface
                 .set_anchor(anchor);
@@ -86,7 +88,7 @@ impl Surface {
             let vertical_margin_px = calc_px_margin(margins.1, display_dimensions.1);
 
             let get_proper_margin = |a: zwlr_layer_surface_v1::Anchor, val: i32| if anchor.contains(a) { val } else { 0 };
-            /*
+
             layer_surface
                 .set_margin(
                     get_proper_margin(zwlr_layer_surface_v1::Anchor::Top, vertical_margin_px),
@@ -94,9 +96,7 @@ impl Surface {
                     get_proper_margin(zwlr_layer_surface_v1::Anchor::Bottom, vertical_margin_px),
                     get_proper_margin(zwlr_layer_surface_v1::Anchor::Left, horizontal_margin_px),
                 );
-            */
-
-        //}
+        }
 
         let next_render_event = Rc::new(Cell::new(None::<RenderEvent>));
         let next_render_event_handle = Rc::clone(&next_render_event);
@@ -119,7 +119,7 @@ impl Surface {
         surface.commit();
 
         // TODO how this work? Why need (0, 0) in dimensions?
-        Self { surface, layer_surface, next_render_event, pool, dimensions: (0, 0) }
+        Self { surface, layer_surface, next_render_event, pool, dimensions: (0, 0), text }
     }
 
     /// Handles any events that have occurred since the last call, redrawing if needed.
@@ -163,12 +163,11 @@ impl Surface {
         //draw_line(canvas, (width as u32, height as u32), (50, 10), (100, 200), 2, (155, 0, 0));
         let (font, scale) = load_font_and_scale("Arial", 100.0);
 
-        let text = vec!["ciao", "bello", "giuliooo" ];
 
         let init_x: &mut f32 = &mut 10.0;
         let init_y: &mut f32 = &mut 10.0;
 
-        draw_text(canvas, (init_x, init_y), self.dimensions.0 as f32, &font, &scale, &text, 0.0, Color { r: 255, g: 0, b: 0 });
+        draw_text(canvas, (init_x, init_y), self.dimensions.0 as f32, &font, &scale, &self.text, 0.0, Color { r: 255, g: 0, b: 0 });
 
         //draw_text(canvas, (&mut x_init, &mut y_init), &font, 14.0, &text, 0.0, 5.0, (height as u32, width as u32));
 
@@ -204,7 +203,7 @@ fn load_font_and_scale(font_name: &str, font_size: f32) -> (Font, Scale) {
     (font, scale)
 }
 
-fn draw_text(canvas : &mut [u8], (init_x, init_y): (&mut f32, &mut f32), width_win: f32, font: &Font, scale: &Scale, text: &Vec<&str>, intra_line: f32, color: Color) {
+fn draw_text(canvas : &mut [u8], (init_x, init_y): (&mut f32, &mut f32), width_win: f32, font: &Font, scale: &Scale, text: &Vec<String>, intra_line: f32, color: Color) {
 
         let v_metrics = font.v_metrics(*scale);
         for line in text {
@@ -471,8 +470,28 @@ impl Drop for Surface {
 fn main() {
 
     // Take from line argument the text and render the glyph + screen size
+    let mut args: Vec<String> = env::args().collect();
+    args.remove(0); // remove the name of the file
 
-    let gwstuff_config: parser::Config = parser::init_toml_config(None);
+    if args.len() == 0 {
+        println!("No text specified");
+        return;
+    }
+
+    println!("{}", args[0][..1].to_string());
+
+    let config_name: Option<String> = match args[0][..1] == "--".to_owned() {
+        true => {
+            let name = args[0][2..].to_string();
+            args.remove(0);
+            Some(name)
+        },
+        false => None,
+    };
+
+    println!("{:?}", args);
+
+    let gwstuff_config: parser::Config = parser::init_toml_config(config_name);
 
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
@@ -523,6 +542,7 @@ fn main() {
                                                 display_dim,
                                                 zwlr_layer_surface_v1::Anchor::from_raw(win_position.0.to_raw() | win_position.1.to_raw()).unwrap(), // TODO remove unwrap
                                                 (gwstuff_config.margins.horizontal_percentage, gwstuff_config.margins.vertical_percentage),
+                                                args.clone()
                                              )
                        )
                     );

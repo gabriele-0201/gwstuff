@@ -4,7 +4,7 @@ use whoami;
 use std::fs;
 
 #[derive(Debug, Deserialize)]
-pub struct Config{
+pub struct Config {
     pub window:  WindowProps,
     pub margins: MarginProps,
     pub font:    FontProps,
@@ -19,13 +19,7 @@ pub enum Placement{
     CenterVertical,
     CenterHorizontal,
 }
-/*
- * 00000100
- * 00000011
- * 00000111
- *
- *
- * */
+
 impl Placement{
     pub fn to_raw(self) -> u32{
         match self{
@@ -39,13 +33,20 @@ impl Placement{
     }
 }
 
+#[derive(Debug, Deserialize, Copy, Clone)]
+pub enum TextAlignment {
+    Center, 
+    Left, 
+    Right,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct WindowProps{
     pub width: u32,
     pub height: u32,
     pub background_color: u32,
     win_position_str: String,
-    pub win_position: Option<(Placement, Placement)>,
+    pub win_position: (Placement, Placement),
 }
 impl WindowProps{
     pub fn calc_win_position(&mut self) {
@@ -71,7 +72,7 @@ impl WindowProps{
             }
         });
 
-        self.win_position = Some(full_placement.clone());
+        self.win_position = full_placement.clone();
     }
 }
 
@@ -84,8 +85,10 @@ pub struct MarginProps{
 #[derive(Debug, Deserialize)]
 pub struct FontProps{
     pub name:  String,
-    pub size:  u8,
+    pub size:  f32,
     pub color: u32,
+    pub intra_line: f32,
+    pub text_alignment :TextAlignment
 }
 
 
@@ -107,10 +110,11 @@ static DEFAULT_CONFIG: &str = r#"
         name  = 'Roboto Condensed'
         size  = 15
         color = 0x808080
+        #intra_line = 1.0
     "#;
 
 
-pub fn init_toml_config(config_name: Option<String>) -> Config{
+pub fn init_toml_config(config_name: Option<String>) -> Config {
 
     let mut config: Config;
 

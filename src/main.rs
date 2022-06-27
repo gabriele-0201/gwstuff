@@ -1,3 +1,5 @@
+mod parser;
+
 use smithay_client_toolkit::{
     default_environment,
     environment::SimpleGlobal,
@@ -20,9 +22,9 @@ use std::rc::Rc;
 use std::env;
 
 use font_loader::system_fonts;
-use rusttype::{point, Font, Scale};
+use rusttype::{point, Font, Scale, PositionedGlyph};
 
-mod parser;
+use parser::Config;
 
 default_environment!(Env,
     fields = [
@@ -45,25 +47,24 @@ enum RenderEvent {
     Closed,
 }
 
-struct Surface {
+struct Surface<'a> {
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    text: Vec<String>,
+    config: Config,
+    text_and_width: Vec<(Vec<PositionedGlyph<'a>>, u32)>
 }
 
-impl Surface {
+impl Surface<'_> {
     fn new(
         //output: &wl_output::WlOutput,
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: AutoMemPool,
-        dimensions: (u32, u32),
-        display_dimensions: (u32, u32), // TODO
-        anchor: zwlr_layer_surface_v1::Anchor,
-        margins: (u8, u8), // margin %
+        display_dimensions: (u32, u32),
+        config: Config,
         text: Vec<String>,
     ) -> Self {
 
@@ -75,7 +76,13 @@ impl Surface {
             "gwstuff".to_owned(),
         );
 
-        layer_surface.set_size(dimensions.0, dimensions.1);
+        // Calc window dimensions and get glyphs alread positioned
+        
+        let dimensions_and_glyphs = get_dimensions_and_glyphs(config, &text);
+        
+        layer_surface.set_size(dimensions_and_glyphs.0.0, dimensions_and_glyphs.0.1);
+
+        let anchor = zwlr_layer_surface_v1::Anchor::from_raw(config.window.win_position.0.to_raw() | config.window.win_position.1.to_raw()).unwrap();
 
         if !anchor.contains(zwlr_layer_surface_v1::Anchor::from_raw(15).unwrap()) {
 
@@ -84,8 +91,8 @@ impl Surface {
 
             let calc_px_margin = |val: u8, tot: u32| ((val as u32 * tot) / 100) as i32;
 
-            let horizontal_margin_px = calc_px_margin(margins.0, display_dimensions.0);
-            let vertical_margin_px = calc_px_margin(margins.1, display_dimensions.1);
+            let horizontal_margin_px = calc_px_margin(config.margins.horizontal_percentage, display_dimensions.0);
+            let vertical_margin_px = calc_px_margin(config.margins.vertical_percentage, display_dimensions.1);
 
             let get_proper_margin = |a: zwlr_layer_surface_v1::Anchor, val: i32| if anchor.contains(a) { val } else { 0 };
 
@@ -119,7 +126,15 @@ impl Surface {
         surface.commit();
 
         // TODO how this work? Why need (0, 0) in dimensions?
-        Self { surface, layer_surface, next_render_event, pool, dimensions: (0, 0), text }
+        Self { 
+            surface, 
+            layer_surface, 
+            next_render_event, 
+            pool, 
+            dimensions: (dimensions_and_glyphs.0.0, dimensions_and_glyphs.0.1), 
+            config, 
+            text_and_width: dimensions_and_glyphs.1 
+        }
     }
 
     /// Handles any events that have occurred since the last call, redrawing if needed.
@@ -150,24 +165,14 @@ impl Surface {
         let (canvas, buffer) =
             self.pool.buffer(width, height, stride, wl_shm::Format::Argb8888).unwrap();
 
-        // TODO function for background
-        // BACKGROUND
-        for dst_pixel in canvas.chunks_exact_mut(4) {
-            let pixel = 0xff00ff00u32.to_ne_bytes();
-            dst_pixel[0] = pixel[0];
-            dst_pixel[1] = pixel[1];
-            dst_pixel[2] = pixel[2];
-            dst_pixel[3] = pixel[3];
-        }
+        set_backgorund(canvas, self.config.window.background_color);
 
         //draw_line(canvas, (width as u32, height as u32), (50, 10), (100, 200), 2, (155, 0, 0));
-        let (font, scale) = load_font_and_scale("Arial", 100.0);
-
 
         let init_x: &mut f32 = &mut 10.0;
         let init_y: &mut f32 = &mut 10.0;
 
-        draw_text(canvas, (init_x, init_y), self.dimensions.0 as f32, &font, &scale, &self.text, 0.0, Color { r: 255, g: 0, b: 0 });
+        draw_text(canvas);
 
         //draw_text(canvas, (&mut x_init, &mut y_init), &font, 14.0, &text, 0.0, 5.0, (height as u32, width as u32));
 
@@ -178,7 +183,82 @@ impl Surface {
         // Finally, commit the surface
         self.surface.commit();
     }
+
+    fn draw_text(&self, canvas : &mut [u8]) {
+        
+        let pixel = self.config.font.color.to_ne_bytes();
+
+        let init_x: u32 = 0;
+        let init_y: u32 = 0;
+    
+        for (glyphs, width_line) in self.text_and_width.iter() {
+
+            for g in glyphs {
+                if let Some(bb) = g.pixel_bounding_box() {
+                    g.draw(|x, y, v| {
+                        
+                        // v should be in the range 0.0 to 1.0
+                        let x = x as i32 + bb.min.x;
+                        let y = y as i32 + bb.min.y;
+                        // There's still a possibility that the glyph clips the boundaries of the bitmap
+                        if /*x >= 0 && x < *width_line as i32 && y >= 0 && y < scale.y as i32 &&*/ v >= 0.01 {
+                            let x = x as usize;
+                            let y = y as usize;
+    
+                            let pixel_canvas = canvas.chunks_exact_mut(4).nth(x + (y * self.dimensions.0 as usize)).unwrap();
+    
+                            pixel_canvas[0] = pixel[0];
+                            pixel_canvas[1] = pixel[1];
+                            pixel_canvas[2] = pixel[2];
+                            pixel_canvas[3] = pixel[3];
+                         }
+                    })
+                }
+            }
+            init_y += intra_line + scale.y;
+        }
+    }
 }
+
+fn get_dimensions_and_glyphs (config: Config, text: &Vec<String>) -> ((u32, u32), Vec<(Vec<PositionedGlyph>, u32)>) {
+
+    let (font, scale) = load_font_and_scale(&config.font.name[..], config.font.size);
+
+    let v_metrics = font.v_metrics(scale);
+
+    let text_glyphs_and_width: Vec<(Vec<PositionedGlyph>, u32)>;
+
+    let win_h: f32 = 0.0;
+    let win_w: u32 = 0;
+
+    for (index, line) in text.iter().enumerate() {
+
+        text_glyphs_and_width.push((font.layout(line, scale, point(0.0, v_metrics.ascent)).collect(), 0));
+        //let glyphs: Vec<_> = font.layout(line, scale, point(0.0, v_metrics.ascent)).collect();
+
+        // Find the most visually pleasing width to display
+        let width_line = text_glyphs_and_width.last().unwrap().0
+            .iter()
+            .rev()
+            .map(|g| g.position().x as f32 + g.unpositioned().h_metrics().advance_width)
+            .next()
+            .unwrap_or(0.0)
+            .ceil() as usize;
+
+        if width_line as u32 > win_w {
+            win_w = width_line as u32;
+        }
+
+        win_h += scale.y;
+
+        if index != 0 && index != text.len() {
+            win_h += config.font.intra_line;
+        }
+    }
+
+    ((win_w, win_h.ceil() as u32), text_glyphs_and_width)
+}
+
 
 // TODO calc properly scale - and font type
 fn load_font_and_scale(font_name: &str, font_size: f32) -> (Font, Scale) {
@@ -203,176 +283,19 @@ fn load_font_and_scale(font_name: &str, font_size: f32) -> (Font, Scale) {
     (font, scale)
 }
 
-fn draw_text(canvas : &mut [u8], (init_x, init_y): (&mut f32, &mut f32), width_win: f32, font: &Font, scale: &Scale, text: &Vec<String>, intra_line: f32, color: Color) {
+fn set_backgorund (canvas : &mut [u8], color: u32) {
 
-        let v_metrics = font.v_metrics(*scale);
-        for line in text {
-
-            let offset = point(*init_y * width_win + *init_x, v_metrics.ascent);
-
-            let glyphs: Vec<_> = font.layout(line, *scale, offset).collect();
-
-            // println!("{:?}", glyphs);
-
-            // Find the most visually pleasing width to display
-            let width_line = glyphs
-                .iter()
-                .rev()
-                .map(|g| g.position().x as f32 + g.unpositioned().h_metrics().advance_width)
-                .next()
-                .unwrap_or(0.0)
-                .ceil() as usize;
-
-            for g in glyphs {
-                if let Some(bb) = g.pixel_bounding_box() {
-                    g.draw(|x, y, v| {
-                        
-                        // v should be in the range 0.0 to 1.0
-                        let x = x as i32 + bb.min.x;
-                        let y = y as i32 + bb.min.y;
-                        // There's still a possibility that the glyph clips the boundaries of the bitmap
-                        if x >= 0 && x < width_line as i32 && y >= 0 && y < scale.y as i32 && v >= 0.01 {
-                            let x = x as usize;
-                            let y = y as usize;
-
-                            let pixel = to_pixel(color.r, color.g, color.b, (v * 255.0).floor() as u8);
-                            let pixel_canvas = canvas.chunks_exact_mut(4).nth(x + (y * width_win as usize)).unwrap();
-
-                            pixel_canvas[0] = pixel[0];
-                            pixel_canvas[1] = pixel[1];
-                            pixel_canvas[2] = pixel[2];
-                            pixel_canvas[3] = pixel[3];
-                         }
-                    })
-                }
-            }
-            *init_y += intra_line + scale.y;
-        }
-}
-
-/*
-fn draw_text(canvas : &mut [u8], (init_x, init_y): (&mut f32, &mut f32), font: &FontRef, pt_size: f32, text: &String, intra_letter: f32, intra_line: f32, (height, width): (u32, u32)) {
-
-    // Qui devo prendermi tutte le proprieta' del font per capire dove cavolo disegnare il coso
+    // possibly draw also the border line!!!
     
-    //calc the font unit
-    let screen_scale_factor = 1.0;
-    let px_per_em = pt_size * screen_scale_factor * (96.0 / 72.0);
-    let units_per_em = font.units_per_em().unwrap();
-    let height_font_unscaled = font.height_unscaled();
-    let px_scale = PxScale::from(px_per_em * height_font_unscaled / units_per_em);
-
-    let scaled_font = font.into_scaled(px_scale);
-
-    let descend = scaled_font.descent();
-    let ascent = scaled_font.ascent();
-
-    *init_y += ascent;
-
-    for line in text.lines() {
-        // qui devo chiaare il draw letter per ogni lettera ed ipoteticamente passargli anche la
-        // posizione di inizio -> devo scegliere se fare io i conti dell'offset oppure utilizzare
-        // il metodo with_scale_and_position e quindi impostare anche il point di inizio (penso)
-        
-        draw_text_line(line, canvas, &scaled_font, (init_x, init_y), intra_letter, (height, width));
-
-        *init_y += descend + intra_line + ascent;
-
-
+    let pixel = color.to_ne_bytes();
+    for dst_pixel in canvas.chunks_exact_mut(4) {
+        dst_pixel[0] = pixel[0];
+        dst_pixel[1] = pixel[1];
+        dst_pixel[2] = pixel[2];
+        dst_pixel[3] = pixel[3];
     }
-
+    
 }
-*/
-
-/*
-fn draw_text_line(line: &str, canvas : &mut [u8], scaled_font: &PxScaleFont<&FontRef>, (init_x, init_y): (&mut f32, &mut f32), intra_letter: f32, (height, width): (u32, u32)) {
-
-    let width_font = scaled_font.scale().x;
-
-    for c in line.chars() {
-
-        draw_letter(c, canvas, &scaled_font, (*init_x, *init_y), (height, width));
-
-        *init_x += width_font + intra_letter;
-    }
-
-}
-*/
-
-/*
-fn draw_letter(letter: char, canvas : &mut [u8], scaled_font: &PxScaleFont<&FontRef>, (init_x, init_y): (f32, f32), (height, width): (u32, u32)) {
-        
-        let glyph = scaled_font.scaled_glyph(letter);
-        let ascent = scaled_font.ascent();
-        let descent = scaled_font.descent();
-        let h_font = scaled_font.height();
-
-        //println!("{}", ascent);
-        //println!("{}", descent);
-        //println!("{}", h_font);
-
-        /*
-        println!("x: {}", scaled_font.scale().x);
-        println!("y: {}", scaled_font.scale().y);
-        */
-
-        // TODO TEST
-
-        //calc the font unit
-        let font_name = String::from("ciao");
-        let font = load_font(&font_name).unwrap();
-
-        let pt_size = 15.0;
-        let screen_scale_factor = 1.0;
-        let px_per_em = pt_size * screen_scale_factor * (96.0 / 72.0);
-        let units_per_em = font.units_per_em().unwrap();
-        let height_font_unscaled = font.height_unscaled();
-        let px_scale = PxScale::from(px_per_em * height_font_unscaled / units_per_em);
-
-        let q_glyph: Glyph = font.glyph_id(letter).with_scale(px_per_em * height_font_unscaled / units_per_em);
-
-        let mut max_y = 0;
-        let mut max_x = 0;
-        
-        println!("ascent: {}", ascent);
-        println!("descent: {}", descent);
-        println!("h_font: {}", h_font);
-
-        // Draw it.
-        if let Some(q) = /*scaled_font*/font.outline_glyph(/*glyph*/q_glyph) {
-
-            println!("x: {}", q.px_bounds().width());
-            println!("y: {}", q.px_bounds().height());
-
-            q.draw(|x, y, c| {
-                if c <= 0.3 {
-                    return;
-                }
-
-                if max_y < y {
-                    max_y = y;
-                }
-                if max_x < x {
-                    max_x = x;
-                }
-
-                let pixel = to_pixel(255,0, 0, (c * 255.0) as u32);
-
-                //let y_with_offset = if y > ascent.floor() as u32 {init_y - y as f32} else {init_y + y as f32};
-                let y_with_offset = y;
-                let pixel_canvas = canvas.chunks_exact_mut(4).nth(((init_x as u32 + x) as u32 + (y_with_offset as u32) * width as u32) as usize).unwrap();
-
-                pixel_canvas[0] = pixel[0];
-                pixel_canvas[1] = pixel[1];
-                pixel_canvas[2] = pixel[2];
-                pixel_canvas[3] = pixel[3];
-            });
-        }
-        println!("max_y: {}", max_y);
-        println!("max_x: {}", max_x);
-
-}
-*/
 
 fn to_pixel(r: u8, g: u8, b: u8, t: u8) -> [u8; 4] {
     (((t as u32) << 24) + ((r as u32) << 16) + ((g as u32) << 8) + (b as u32)).to_ne_bytes()
@@ -386,16 +309,6 @@ fn normalize ((x, y): (f32, f32)) -> (f32, f32) {
     let ln = length((x, y));
     ((x / ln), (y / ln))
 }
-
-/*
-impl ops::Mul<f32> for (f32, f32) {
-    type Output = (f32, f32);
-
-    fn add(self, val: f32) -> Output {
-        (self.0 * val, self.1 * val)
-    }
-}
-*/
 
 /*
 fn draw_line(canvas : &mut [u8], (buf_x, buf_y): (u32, u32), (x_init, y_init): (u32, u32),(x_end, y_end): (u32, u32), thikness: u32, (r, g, b): (u32, u32, u32)) {
@@ -460,7 +373,7 @@ fn draw_line(canvas : &mut [u8], (buf_x, buf_y): (u32, u32), (x_init, y_init): (
 }
 */
 
-impl Drop for Surface {
+impl Drop for Surface<'_> {
     fn drop(&mut self) {
         self.layer_surface.destroy();
         self.surface.destroy();
@@ -478,9 +391,9 @@ fn main() {
         return;
     }
 
-    println!("{}", args[0][..1].to_string());
+    println!("{}", args[0][..2].to_string());
 
-    let config_name: Option<String> = match args[0][..1] == "--".to_owned() {
+    let config_name: Option<String> = match args[0][..2] == "--".to_owned() {
         true => {
             let name = args[0][2..].to_string();
             args.remove(0);
@@ -489,9 +402,7 @@ fn main() {
         false => None,
     };
 
-    println!("{:?}", args);
-
-    let gwstuff_config: parser::Config = parser::init_toml_config(config_name);
+    let gwstuff_config: Config = parser::init_toml_config(config_name);
 
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
@@ -505,21 +416,11 @@ fn main() {
     let surfaces_handle = Rc::clone(&surfaces);
     let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo| {
 
-
         let mut display_dim: (u32, u32) = (1, 1);
         for &mode in info.modes.iter() {
             if mode.is_current {
                 display_dim = (mode.dimensions.0 as u32, mode.dimensions.1 as u32);
             }
-        }
-
-        let win_position: (parser::Placement, parser::Placement);
-
-        if let Some(pos) = gwstuff_config.window.win_position {
-            win_position = pos;
-        }
-        else{
-            win_position = (parser::Placement::CenterHorizontal, parser::Placement::CenterVertical);
         }
 
         if info.obsolete {
@@ -538,10 +439,11 @@ fn main() {
                                                 surface,
                                                 &layer_shell.clone(),
                                                 pool,
-                                                (gwstuff_config.window.width, gwstuff_config.window.height),
+                                                //(gwstuff_config.window.width, gwstuff_config.window.height),
                                                 display_dim,
-                                                zwlr_layer_surface_v1::Anchor::from_raw(win_position.0.to_raw() | win_position.1.to_raw()).unwrap(), // TODO remove unwrap
-                                                (gwstuff_config.margins.horizontal_percentage, gwstuff_config.margins.vertical_percentage),
+                                                //zwlr_layer_surface_v1::Anchor::from_raw(win_position.0.to_raw() | win_position.1.to_raw()).unwrap(), // TODO remove unwrap
+                                                //(gwstuff_config.margins.horizontal_percentage, gwstuff_config.margins.vertical_percentage),
+                                                gwstuff_config,
                                                 args.clone()
                                              )
                        )

@@ -4,6 +4,8 @@
 
 ## RoadMap
 
+IMPORTANT -> Make a little design to divede responsability
+
 MVP: 
 
 + [x] layer alignment

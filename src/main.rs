@@ -53,18 +53,18 @@ struct Surface<'a> {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    config: Config,
+    config: &'a Config,
     text_and_width: Vec<(Vec<PositionedGlyph<'a>>, u32)>
 }
 
-impl Surface<'_> {
+impl<'a> Surface<'a>{
     fn new(
         //output: &wl_output::WlOutput,
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: AutoMemPool,
         display_dimensions: (u32, u32),
-        config: Config,
+        config: &'a Config,
         text: Vec<String>,
     ) -> Self {
 
@@ -78,7 +78,7 @@ impl Surface<'_> {
 
         // Calc window dimensions and get glyphs alread positioned
         
-        let dimensions_and_glyphs = get_dimensions_and_glyphs(config, &text);
+        let dimensions_and_glyphs = get_dimensions_and_glyphs(&config, &text);
         
         layer_surface.set_size(dimensions_and_glyphs.0.0, dimensions_and_glyphs.0.1);
 
@@ -172,7 +172,7 @@ impl Surface<'_> {
         let init_x: &mut f32 = &mut 10.0;
         let init_y: &mut f32 = &mut 10.0;
 
-        draw_text(canvas);
+        draw_text(canvas, &self.config, &self.text_and_width, &self.dimensions);
 
         //draw_text(canvas, (&mut x_init, &mut y_init), &font, 14.0, &text, 0.0, 5.0, (height as u32, width as u32));
 
@@ -183,57 +183,60 @@ impl Surface<'_> {
         // Finally, commit the surface
         self.surface.commit();
     }
+}
 
-    fn draw_text(&self, canvas : &mut [u8]) {
-        
-        let pixel = self.config.font.color.to_ne_bytes();
+fn draw_text(canvas : &mut [u8], config: &Config, text_and_width: &Vec<(Vec<PositionedGlyph>, u32)>, dimensions: &(u32, u32)) {
 
-        let init_x: u32 = 0;
-        let init_y: u32 = 0;
-    
-        for (glyphs, width_line) in self.text_and_width.iter() {
+    let pixel = config.font.color.to_ne_bytes();
 
-            for g in glyphs {
-                if let Some(bb) = g.pixel_bounding_box() {
-                    g.draw(|x, y, v| {
-                        
-                        // v should be in the range 0.0 to 1.0
-                        let x = x as i32 + bb.min.x;
-                        let y = y as i32 + bb.min.y;
-                        // There's still a possibility that the glyph clips the boundaries of the bitmap
-                        if /*x >= 0 && x < *width_line as i32 && y >= 0 && y < scale.y as i32 &&*/ v >= 0.01 {
-                            let x = x as usize;
-                            let y = y as usize;
-    
-                            let pixel_canvas = canvas.chunks_exact_mut(4).nth(x + (y * self.dimensions.0 as usize)).unwrap();
-    
-                            pixel_canvas[0] = pixel[0];
-                            pixel_canvas[1] = pixel[1];
-                            pixel_canvas[2] = pixel[2];
-                            pixel_canvas[3] = pixel[3];
-                         }
-                    })
-                }
+    let init_x: u32 = 0;
+    let init_y: u32 = 0;
+
+    for (glyphs, width_line) in text_and_width.iter() {
+
+        for g in glyphs {
+            if let Some(bb) = g.pixel_bounding_box() {
+                g.draw(|x, y, v| {
+
+                    // v should be in the range 0.0 to 1.0
+                    let x = x as i32 + bb.min.x;
+                    let y = y as i32 + bb.min.y;
+                    // There's still a possibility that the glyph clips the boundaries of the bitmap
+                    if /*x >= 0 && x < *width_line as i32 && y >= 0 && y < scale.y as i32 &&*/ v >= 0.01 {
+                        let x = x as usize;
+                        let y = y as usize;
+
+                        let pixel_canvas = canvas.chunks_exact_mut(4).nth(x + (y * dimensions.0 as usize)).unwrap();
+
+                        pixel_canvas[0] = pixel[0];
+                        pixel_canvas[1] = pixel[1];
+                        pixel_canvas[2] = pixel[2];
+                        pixel_canvas[3] = pixel[3];
+                        }
+                })
             }
-            init_y += intra_line + scale.y;
         }
+        //init_y += intra_line + scale.y;
     }
 }
 
-fn get_dimensions_and_glyphs (config: Config, text: &Vec<String>) -> ((u32, u32), Vec<(Vec<PositionedGlyph>, u32)>) {
+fn get_dimensions_and_glyphs<'a> (config: &'a Config, text: &Vec<String>) -> ((u32, u32), Vec<(Vec<PositionedGlyph<'a>>, u32)>) {
 
     let (font, scale) = load_font_and_scale(&config.font.name[..], config.font.size);
 
     let v_metrics = font.v_metrics(scale);
 
-    let text_glyphs_and_width: Vec<(Vec<PositionedGlyph>, u32)>;
+    let mut text_glyphs_and_width: Vec<(Vec<PositionedGlyph>, u32)> = Vec::new();
 
-    let win_h: f32 = 0.0;
-    let win_w: u32 = 0;
+    let mut win_h: f32 = 0.0;
+    let mut win_w: u32 = 0;
 
     for (index, line) in text.iter().enumerate() {
 
-        text_glyphs_and_width.push((font.layout(line, scale, point(0.0, v_metrics.ascent)).collect(), 0));
+        let layout_iter = font.layout(line, scale, point(0.0, v_metrics.ascent));
+        let glyphs: Vec<PositionedGlyph> = layout_iter.collect();
+
+        text_glyphs_and_width.push((glyphs.clone(), 0));
         //let glyphs: Vec<_> = font.layout(line, scale, point(0.0, v_metrics.ascent)).collect();
 
         // Find the most visually pleasing width to display
@@ -414,7 +417,7 @@ fn main() {
 
     let env_handle = env.clone();
     let surfaces_handle = Rc::clone(&surfaces);
-    let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo| {
+    let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo, config: &Config| {
 
         let mut display_dim: (u32, u32) = (1, 1);
         for &mode in info.modes.iter() {
@@ -443,7 +446,7 @@ fn main() {
                                                 display_dim,
                                                 //zwlr_layer_surface_v1::Anchor::from_raw(win_position.0.to_raw() | win_position.1.to_raw()).unwrap(), // TODO remove unwrap
                                                 //(gwstuff_config.margins.horizontal_percentage, gwstuff_config.margins.vertical_percentage),
-                                                gwstuff_config,
+                                                &config,
                                                 args.clone()
                                              )
                        )
@@ -454,14 +457,14 @@ fn main() {
     // Process currently existing outputs
     for output in env.get_all_outputs() {
         if let Some(info) = with_output_info(&output, Clone::clone) {
-            output_handler(output, &info);
+            output_handler(output, &info, &gwstuff_config);
         }
-    }
+   }
 
     // Setup a listener for changes
     // The listener will live for as long as we keep this handle alive
     let _listner_handle =
-        env.listen_for_outputs(move |output, info, _| output_handler(output, info));
+        env.listen_for_outputs(move |output, info, _| output_handler(output, info, &gwstuff_config));
 
     let mut event_loop = calloop::EventLoop::<()>::try_new().unwrap();
 

@@ -53,7 +53,7 @@ struct Surface<'a> {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    config: &'a Config,
+    config: Rc<Box<Config>>,
     text_and_width: Vec<(Vec<PositionedGlyph<'a>>, u32)>
 }
 
@@ -64,7 +64,7 @@ impl<'a> Surface<'a>{
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: AutoMemPool,
         display_dimensions: (u32, u32),
-        config: &'a Config,
+        config: Rc<Box<Config>>,
         text: Vec<String>,
     ) -> Self {
 
@@ -78,7 +78,7 @@ impl<'a> Surface<'a>{
 
         // Calc window dimensions and get glyphs alread positioned
         
-        let dimensions_and_glyphs = get_dimensions_and_glyphs(&config, &text);
+        let dimensions_and_glyphs = get_dimensions_and_glyphs(Rc::clone(&config), &text);
         
         layer_surface.set_size(dimensions_and_glyphs.0.0, dimensions_and_glyphs.0.1);
 
@@ -132,7 +132,7 @@ impl<'a> Surface<'a>{
             next_render_event, 
             pool, 
             dimensions: (dimensions_and_glyphs.0.0, dimensions_and_glyphs.0.1), 
-            config, 
+            config: Rc::clone(&config), 
             text_and_width: dimensions_and_glyphs.1 
         }
     }
@@ -169,10 +169,7 @@ impl<'a> Surface<'a>{
 
         //draw_line(canvas, (width as u32, height as u32), (50, 10), (100, 200), 2, (155, 0, 0));
 
-        let init_x: &mut f32 = &mut 10.0;
-        let init_y: &mut f32 = &mut 10.0;
-
-        draw_text(canvas, &self.config, &self.text_and_width, &self.dimensions);
+        draw_text(canvas, &*self.config, &self.text_and_width, &self.dimensions);
 
         //draw_text(canvas, (&mut x_init, &mut y_init), &font, 14.0, &text, 0.0, 5.0, (height as u32, width as u32));
 
@@ -189,8 +186,20 @@ fn draw_text(canvas : &mut [u8], config: &Config, text_and_width: &Vec<(Vec<Posi
 
     let pixel = config.font.color.to_ne_bytes();
 
-    let init_x: u32 = 0;
-    let init_y: u32 = 0;
+    let dim_y = text_and_width[0].0[0].scale().y as u32;
+    let mut init_x: u32;
+    let mut init_y: u32;
+
+    match config.font.text_alignment {
+        parser::TextAlignment::Center => {
+            init_x = config.window.horizontal_padding;
+            init_y = config.window.vertical_padding;
+        },
+        _ => {
+            init_x = 0;
+            init_y = 0;
+        }
+    }
 
     for (glyphs, width_line) in text_and_width.iter() {
 
@@ -203,26 +212,30 @@ fn draw_text(canvas : &mut [u8], config: &Config, text_and_width: &Vec<(Vec<Posi
                     let y = y as i32 + bb.min.y;
                     // There's still a possibility that the glyph clips the boundaries of the bitmap
                     if /*x >= 0 && x < *width_line as i32 && y >= 0 && y < scale.y as i32 &&*/ v >= 0.01 {
+                        /*
                         let x = x as usize;
                         let y = y as usize;
+                        */
+                        let x = x as u32;
+                        let y = y as u32;
 
-                        let pixel_canvas = canvas.chunks_exact_mut(4).nth(x + (y * dimensions.0 as usize)).unwrap();
+                        let pixel_canvas = canvas.chunks_exact_mut(4).nth((init_x + x + ((init_y + y) * dimensions.0)) as usize).unwrap();
 
                         pixel_canvas[0] = pixel[0];
                         pixel_canvas[1] = pixel[1];
                         pixel_canvas[2] = pixel[2];
                         pixel_canvas[3] = pixel[3];
-                        }
+                    }
                 })
             }
         }
-        //init_y += intra_line + scale.y;
+        init_y += (config.font.intra_line as u32) + dim_y;
     }
 }
 
-fn get_dimensions_and_glyphs<'a> (config: &'a Config, text: &Vec<String>) -> ((u32, u32), Vec<(Vec<PositionedGlyph<'a>>, u32)>) {
+fn get_dimensions_and_glyphs<'a> (config: Rc<Box<Config>>, text: &Vec<String>) -> ((u32, u32), Vec<(Vec<PositionedGlyph<'a>>, u32)>) {
 
-    let (font, scale) = load_font_and_scale(&config.font.name[..], config.font.size);
+    let (font, scale) = load_font_and_scale(&config.font.name.clone()[..], config.font.size);
 
     let v_metrics = font.v_metrics(scale);
 
@@ -405,7 +418,7 @@ fn main() {
         false => None,
     };
 
-    let gwstuff_config: Config = parser::init_toml_config(config_name);
+    let gwstuff_config: Rc<Box<Config>> = Rc::new(parser::init_toml_config(config_name));
 
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
@@ -417,7 +430,7 @@ fn main() {
 
     let env_handle = env.clone();
     let surfaces_handle = Rc::clone(&surfaces);
-    let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo, config: &Config| {
+    let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo| {
 
         let mut display_dim: (u32, u32) = (1, 1);
         for &mode in info.modes.iter() {
@@ -446,7 +459,7 @@ fn main() {
                                                 display_dim,
                                                 //zwlr_layer_surface_v1::Anchor::from_raw(win_position.0.to_raw() | win_position.1.to_raw()).unwrap(), // TODO remove unwrap
                                                 //(gwstuff_config.margins.horizontal_percentage, gwstuff_config.margins.vertical_percentage),
-                                                &config,
+                                                Rc::clone(&gwstuff_config),
                                                 args.clone()
                                              )
                        )
@@ -457,14 +470,14 @@ fn main() {
     // Process currently existing outputs
     for output in env.get_all_outputs() {
         if let Some(info) = with_output_info(&output, Clone::clone) {
-            output_handler(output, &info, &gwstuff_config);
+            output_handler(output, &info);
         }
    }
 
     // Setup a listener for changes
     // The listener will live for as long as we keep this handle alive
     let _listner_handle =
-        env.listen_for_outputs(move |output, info, _| output_handler(output, info, &gwstuff_config));
+        env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
     let mut event_loop = calloop::EventLoop::<()>::try_new().unwrap();
 

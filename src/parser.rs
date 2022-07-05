@@ -47,6 +47,9 @@ pub struct WindowProps{
     pub background_color: u32,
     win_position_str: String,
     pub win_position: (Placement, Placement),
+    pub vertical_padding: u32,
+    pub horizontal_padding: u32
+
 }
 impl WindowProps{
     pub fn calc_win_position(&mut self) {
@@ -88,7 +91,7 @@ pub struct FontProps{
     pub size:  f32,
     pub color: u32,
     pub intra_line: f32,
-    pub text_alignment :TextAlignment
+    pub text_alignment: TextAlignment
 }
 
 
@@ -102,6 +105,9 @@ static DEFAULT_CONFIG: &str = r#"
         # Possible values are {CenterVertical, CenterHorizontal, Top, Bottom, Left, Right}
         win_position_str = 'Top, Left'
 
+        vertical_padding   = 5
+        horizontal_padding = 5
+
         [margins]
         vertical_percentage   = 5
         horizontal_percentage = 5
@@ -114,18 +120,18 @@ static DEFAULT_CONFIG: &str = r#"
     "#;
 
 
-pub fn init_toml_config(config_name: Option<String>) -> Config {
+pub fn init_toml_config(config_name: Option<String>) -> Box<Config> {
 
-    let mut config: Config;
+    let mut config: Box<Config>;
 
     if let Some(conf_name) = config_name{
         // If the config name is specified, open it in the .conf directory and parse it
         let path: String = format!("{}{}{}{}{}", "/home/", whoami::username(), "/.config/gwstuff/", conf_name, ".toml");
-        config = toml::from_str(&fs::read_to_string(path).expect("Invalid file path")).expect("Invalid TOML config file");
+        config = Box::new(toml::from_str(&fs::read_to_string(path).expect("Invalid file path")).expect("Invalid TOML config file"));
     }
     else{
         // If no filename is given, load default config
-        config = toml::from_str(DEFAULT_CONFIG).expect("Invalid DEFAULT_CONFIG");
+        config = Box::new(toml::from_str(DEFAULT_CONFIG).expect("Invalid DEFAULT_CONFIG"));
     }
 
     config.window.calc_win_position();

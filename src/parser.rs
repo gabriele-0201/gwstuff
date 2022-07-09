@@ -1,5 +1,4 @@
 use serde_derive::Deserialize;
-use std::cell::RefCell;
 
 use toml;
 use whoami;
@@ -122,21 +121,21 @@ static DEFAULT_CONFIG: &str = r#"
     "#;
 
 
-pub fn init_toml_config(config_name: Option<String>) -> RefCell<Config> {
+pub fn init_toml_config(config_name: Option<String>) -> Config {
 
-    let config: RefCell<Config>;
+    let mut config: Config;
 
     if let Some(conf_name) = config_name{
         // If the config name is specified, open it in the .conf directory and parse it
         let path: String = format!("{}{}{}{}{}", "/home/", whoami::username(), "/.config/gwstuff/", conf_name, ".toml");
-        config = RefCell::new(toml::from_str(&fs::read_to_string(path).expect("Invalid file path")).expect("Invalid TOML config file"));
+        config = toml::from_str(&fs::read_to_string(path).expect("Invalid file path")).expect("Invalid TOML config file");
     }
     else{
         // If no filename is given, load default config
-        config = RefCell::new(toml::from_str(DEFAULT_CONFIG).expect("Invalid DEFAULT_CONFIG"));
+        config = toml::from_str(DEFAULT_CONFIG).expect("Invalid DEFAULT_CONFIG");
     }
 
-    config.borrow().window.calc_win_position();
+    config.window.calc_win_position();
 
     config
 }

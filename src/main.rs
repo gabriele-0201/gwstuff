@@ -17,7 +17,7 @@ use smithay_client_toolkit::{
     WaylandSource,
 };
 
-use std::cell::{Cell, RefCell};
+use std::cell::{RefCell, Cell};
 use std::rc::Rc;
 use std::env;
 
@@ -53,8 +53,9 @@ struct Surface<'a> {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    config: Rc<RefCell<Config>>,
-    text_and_width: Rc<RefCell<Vec<(Vec<PositionedGlyph<'a>>, u32)>>>
+    config: Rc<Config>,
+    font_and_scale: (Rc<Font<'a>>, Scale),
+    text_and_width: Vec<(Vec<PositionedGlyph<'a>>, u32)>
 }
 
 impl<'a> Surface<'a>{
@@ -64,7 +65,7 @@ impl<'a> Surface<'a>{
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: AutoMemPool,
         display_dimensions: (u32, u32),
-        config: Rc<RefCell<Config>>,
+        config: Rc<Config>,
         text: Vec<String>,
     ) -> Self {
 
@@ -78,11 +79,57 @@ impl<'a> Surface<'a>{
 
         // Calc window dimensions and get glyphs alread positioned
         
-        let dimensions_and_glyphs = get_dimensions_and_glyphs(Rc::clone(&config), &text);
-        
-        layer_surface.set_size(dimensions_and_glyphs.0.0, dimensions_and_glyphs.0.1);
+        let (font, scale) = load_font_and_scale(config.font.name.clone(), config.font.size);
+        let font = Rc::new(font);
 
-        let anchor = zwlr_layer_surface_v1::Anchor::from_raw(config.borrow().window.win_position.0.to_raw() | config.borrow().window.win_position.1.to_raw()).unwrap();
+        let mut text_glyphs_and_width: Vec<(Vec<PositionedGlyph>, u32)> = Vec::new();
+        //let (win_width, win_height) = get_dimensions_and_glyphs((Rc::clone(&font), &scale), Rc::clone(&config), &text, Rc::clone(&text_glyphs_and_width));
+        
+        // BAH
+        //let config = &config.borrow();
+        let v_metrics = font.v_metrics(scale);
+
+        //let text_glyphs_and_width: Rc<RefCell<Vec<(Vec<PositionedGlyph>, u32)>>> = Rc::new(RefCell::new(Vec::new()));
+
+        let mut win_h: f32 = 0.0;
+        let mut win_w: u32 = 0;
+
+        for (index, line) in text.iter().enumerate() {
+
+            let layout_iter: rusttype::LayoutIter = font.layout(line, scale, point(0.0, v_metrics.ascent));
+            //let glyphs: Box<Vec<PositionedGlyph>> = Box::new(layout_iter.collect());
+            let glyphs: Vec<PositionedGlyph> = layout_iter.collect();
+
+            //let glyphs: Vec<_> = font.layout(line, scale, point(0.0, v_metrics.ascent)).collect();
+            
+            // Find the most visually pleasing width to display
+            //let width_line = text_glyphs_and_width.borrow().last().unwrap().0
+            let width_line = glyphs
+                .iter()
+                .rev()
+                .map(|g| g.position().x as f32 + g.unpositioned().h_metrics().advance_width)
+                .next()
+                .unwrap_or(0.0)
+                .ceil() as usize;
+
+            text_glyphs_and_width.push((glyphs, width_line as u32));
+
+            if width_line as u32 > win_w {
+                win_w = width_line as u32;
+            }
+
+            win_h += scale.y;
+
+            if index != 0 && index != text.len() {
+                win_h += config.font.intra_line;
+            }
+        }
+        let (win_width, win_height) = (win_w, win_h.ceil() as u32);
+        // finish function
+        
+        layer_surface.set_size(win_w, win_h.ceil() as u32);
+
+        let anchor = zwlr_layer_surface_v1::Anchor::from_raw(config.window.win_position.0.to_raw() | config.window.win_position.1.to_raw()).unwrap();
 
         if !anchor.contains(zwlr_layer_surface_v1::Anchor::from_raw(15).unwrap()) {
 
@@ -91,8 +138,8 @@ impl<'a> Surface<'a>{
 
             let calc_px_margin = |val: u8, tot: u32| ((val as u32 * tot) / 100) as i32;
 
-            let horizontal_margin_px = calc_px_margin(config.borrow().margins.horizontal_percentage, display_dimensions.0);
-            let vertical_margin_px = calc_px_margin(config.borrow().margins.vertical_percentage, display_dimensions.1);
+            let horizontal_margin_px = calc_px_margin(config.margins.horizontal_percentage, display_dimensions.0);
+            let vertical_margin_px = calc_px_margin(config.margins.vertical_percentage, display_dimensions.1);
 
             let get_proper_margin = |a: zwlr_layer_surface_v1::Anchor, val: i32| if anchor.contains(a) { val } else { 0 };
 
@@ -131,9 +178,10 @@ impl<'a> Surface<'a>{
             layer_surface, 
             next_render_event, 
             pool, 
-            dimensions: (dimensions_and_glyphs.0.0, dimensions_and_glyphs.0.1), 
+            dimensions: (win_width, win_height), 
             config: Rc::clone(&config), 
-            text_and_width: dimensions_and_glyphs.1
+            font_and_scale: (Rc::clone(&font), scale),
+            text_and_width: text_glyphs_and_width
         }
     }
 
@@ -165,11 +213,11 @@ impl<'a> Surface<'a>{
         let (canvas, buffer) =
             self.pool.buffer(width, height, stride, wl_shm::Format::Argb8888).unwrap();
 
-        set_backgorund(canvas, self.config.borrow().window.background_color);
+        set_backgorund(canvas, self.config.window.background_color);
 
         //draw_line(canvas, (width as u32, height as u32), (50, 10), (100, 200), 2, (155, 0, 0));
 
-        draw_text(canvas, &self.config.borrow(), &self.text_and_width.borrow(), &self.dimensions);
+        draw_text(canvas, &self.config, &self.text_and_width, &self.dimensions);
 
         //draw_text(canvas, (&mut x_init, &mut y_init), &font, 14.0, &text, 0.0, 5.0, (height as u32, width as u32));
 
@@ -203,7 +251,7 @@ fn draw_text(canvas : &mut [u8], config: &Config, text_and_width: &Vec<(Vec<Posi
 
     for (glyphs, width_line) in text_and_width.iter() {
 
-        for g in glyphs {
+        for g in glyphs.iter() {
             if let Some(bb) = g.pixel_bounding_box() {
                 g.draw(|x, y, v| {
 
@@ -233,14 +281,15 @@ fn draw_text(canvas : &mut [u8], config: &Config, text_and_width: &Vec<(Vec<Posi
     }
 }
 
-fn get_dimensions_and_glyphs<'a> (config: Rc<RefCell<Config>>, text: &Vec<String>) -> ((u32, u32), Rc<RefCell<Vec<(Vec<PositionedGlyph<'a>>, u32)>>>) {
+/*
+fn get_dimensions_and_glyphs<'a> (font_and_scale: (Rc<Font<'a>>, &Scale), config: Rc<Config>, text: &Vec<String>, text_glyphs_and_width: Rc<RefCell<Vec<(Vec<PositionedGlyph<'a>>, u32)>>>) -> (u32, u32) /*-> ((u32, u32), Rc<RefCell<Vec<(Box<Vec<PositionedGlyph<'a>>, u32)>>>)*/ {
 
-    let config = &config.borrow();
-    let (font, scale) = load_font_and_scale(&config.font.name[..], config.font.size);
+    //let config = &config.borrow();
+    let (font, scale) = (font_and_scale.0, *font_and_scale.1);
 
     let v_metrics = font.v_metrics(scale);
 
-    let text_glyphs_and_width: Rc<RefCell<Vec<(Vec<PositionedGlyph>, u32)>>> = Rc::new(RefCell::new(Vec::new()));
+    //let text_glyphs_and_width: Rc<RefCell<Vec<(Vec<PositionedGlyph>, u32)>>> = Rc::new(RefCell::new(Vec::new()));
 
     let mut win_h: f32 = 0.0;
     let mut win_w: u32 = 0;
@@ -248,19 +297,22 @@ fn get_dimensions_and_glyphs<'a> (config: Rc<RefCell<Config>>, text: &Vec<String
     for (index, line) in text.iter().enumerate() {
 
         let layout_iter: rusttype::LayoutIter = font.layout(line, scale, point(0.0, v_metrics.ascent));
+        //let glyphs: Box<Vec<PositionedGlyph>> = Box::new(layout_iter.collect());
         let glyphs: Vec<PositionedGlyph> = layout_iter.collect();
 
-        text_glyphs_and_width.borrow().push((glyphs, 0));
         //let glyphs: Vec<_> = font.layout(line, scale, point(0.0, v_metrics.ascent)).collect();
-
+        
         // Find the most visually pleasing width to display
-        let width_line = text_glyphs_and_width.borrow().last().unwrap().0
+        //let width_line = text_glyphs_and_width.borrow().last().unwrap().0
+        let width_line = glyphs
             .iter()
             .rev()
             .map(|g| g.position().x as f32 + g.unpositioned().h_metrics().advance_width)
             .next()
             .unwrap_or(0.0)
             .ceil() as usize;
+
+        text_glyphs_and_width.borrow_mut().push((glyphs, width_line as u32));
 
         if width_line as u32 > win_w {
             win_w = width_line as u32;
@@ -273,15 +325,17 @@ fn get_dimensions_and_glyphs<'a> (config: Rc<RefCell<Config>>, text: &Vec<String
         }
     }
 
-    ((win_w, win_h.ceil() as u32), text_glyphs_and_width)
+    //((win_w, win_h.ceil() as u32), Rc::clone(&text_glyphs_and_width))
+    (win_w, win_h.ceil() as u32) 
 }
+*/
 
 
 // TODO calc properly scale - and font type
-fn load_font_and_scale(font_name: &str, font_size: f32) -> (Font, Scale) {
+fn load_font_and_scale(font_name: String, font_size: f32) -> (Font<'static>, Scale) {
     
     // LOAD FONT
-    let property = system_fonts::FontPropertyBuilder::new().family(font_name).build();
+    let property = system_fonts::FontPropertyBuilder::new().family(&font_name[..]).build();
     let (font_data, _) = system_fonts::get(&property).unwrap();
     
     // TEST RUSTTYPE
@@ -419,7 +473,7 @@ fn main() {
         false => None,
     };
 
-    let gwstuff_config: Rc<RefCell<Config>> = Rc::new(parser::init_toml_config(config_name));
+    let gwstuff_config: Rc<Config> = Rc::new(parser::init_toml_config(config_name));
 
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])

@@ -201,8 +201,6 @@ fn get_canvas(config: Rc<Config>, text_and_width: &Vec<(Vec<PositionedGlyph>, u3
     let mut init_x: u32;
     let mut init_y: u32 = config.window.vertical_padding;
 
-    let pixel = add_trasparency(config.font.color, 1);
-
     for (glyphs, width_line) in text_and_width.iter() {
 
         match config.font.text_alignment {
@@ -225,14 +223,14 @@ fn get_canvas(config: Rc<Config>, text_and_width: &Vec<(Vec<PositionedGlyph>, u3
                     let x = x as i32 + bb.min.x;
                     let y = y as i32 + bb.min.y;
                     // There's still a possibility that the glyph clips the boundaries of the bitmap
-                    if /*x >= 0 && x < *width_line as i32 && y >= 0 && y < scale.y as i32 &&*/ v >= 0.01 {
-                        /*
-                        let x = x as usize;
-                        let y = y as usize;
-                        */
+                    if x >= 0 && x < *width_line as i32 && y >= 0 && y < dim_y as i32 && v >= 0.01 {
                         let x = x as u32;
                         let y = y as u32;
                         
+                        //let pixel = add_trasparency(config.font.color, 1);
+                        //println!("{}", (v * 255.0).ceil() as u8);
+                        let pixel = add_trasparency(config.font.color, (v * 255.0) as u8);
+
                         canvas[(init_x + x + ((init_y + y) * dimensions.0)) as usize] = pixel;
                         
                         /*
@@ -299,23 +297,20 @@ fn get_dimensions_and_canvas(config: Rc<Config>, text: &Vec<String>) -> ((u32, u
     ((win_w, win_h.ceil() as u32), get_canvas(Rc::clone(&config), &text_glyphs_and_width, (win_w, win_h.ceil() as u32))) 
 }
 
-// TODO calc properly scale - and font type
+// FONT LOAD + SCALE DIMENSION -> TODO properly
 fn load_font_and_scale(font_name: String, font_size: f32) -> (Font<'static>, Scale) {
     
     // LOAD FONT
     let property = system_fonts::FontPropertyBuilder::new().family(&font_name[..]).build();
     let (font_data, _) = system_fonts::get(&property).unwrap();
     
-    // TEST RUSTTYPE
+    // RUSTTYPE
     let font = Font::try_from_vec(font_data).unwrap_or_else(|| {
         panic!( "error constructing a Font from data at");
     });
     
-    // FONT LOAD + SCALE DIMENSION
-    /*
-    let px_font = (font_size / 72.0) * 96.0;
-    let height: f32 = px_font; // to get 80 chars across (fits most terminals); adjust as desired
-    */
+    let px_font = font_size * ( 72.0 / 96.0 );
+    //let height: f32 = px_font; // to get 80 chars across (fits most terminals); adjust as desired
                             
     let scale = Scale::uniform(font_size);
 

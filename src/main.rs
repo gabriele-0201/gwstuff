@@ -333,25 +333,14 @@ fn load_font_and_scale(font_name: String, font_size: f32) -> (Font<'static>, Sca
 
 fn set_backgorund (config: Rc<Config>, canvas_vec: &mut Vec<u32>, dimensions: (u32, u32)) {
 
-    // possibly draw also the border line!!!
-    
-    //let pixel = config.window.background_color.to_ne_bytes();
     let opacity = percentage_to_u8(config.window.background_opacity);
     let pixel = add_opacity(config.window.background_color, opacity);
-    //let pixel = config.window.background_color;
     for _ in 0..dimensions.1 {
         for _ in 0..dimensions.0 {
             canvas_vec.push(pixel);
         }
     }
-    /*
-    for dst_pixel in canvas.chunks_exact_mut(4) {
-        dst_pixel[0] = pixel[0];
-        dst_pixel[1] = pixel[1];
-        dst_pixel[2] = pixel[2];
-        dst_pixel[3] = pixel[3];
-    }
-    */
+
 }
 
 fn to_pixel(r: u8, g: u8, b: u8, t: u8) -> [u8; 4] {

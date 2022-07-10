@@ -44,7 +44,7 @@ pub enum TextAlignment {
 #[derive(Debug, Deserialize)]
 pub struct WindowProps{
     pub background_color: u32,
-    pub background_transparency: u32,
+    pub background_opacity: u32,
     win_position_str: String,
     pub vertical_padding: u32,
     pub horizontal_padding: u32,

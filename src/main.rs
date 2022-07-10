@@ -223,13 +223,28 @@ fn get_canvas(config: Rc<Config>, text_and_width: &Vec<(Vec<PositionedGlyph>, u3
                     let x = x as i32 + bb.min.x;
                     let y = y as i32 + bb.min.y;
                     // There's still a possibility that the glyph clips the boundaries of the bitmap
-                    if x >= 0 && x < *width_line as i32 && y >= 0 && y < dim_y as i32 && v >= 0.01 {
+                    if x >= 0 && x < *width_line as i32 && y >= 0 && y < dim_y as i32 /*&& v >= 0.1*/ {
                         let x = x as u32;
                         let y = y as u32;
                         
-                        //let pixel = add_trasparency(config.font.color, 1);
-                        //println!("{}", (v * 255.0).ceil() as u8);
-                        let pixel = add_trasparency(config.font.color, (v * 255.0) as u8);
+                        //let pixel = add_opacity(config.font.color, 0);
+                        //println!("{}", (v * 255.0).floor() as u8);
+                        //let pixel = add_opacity(config.font.color, (v * 255.0).floor() as u8);
+                        //
+                        let mul_color = |color: u32, coverage: f32| -> u32 {
+
+                            let mut color_bytes = color.to_ne_bytes();
+                            for i in 0..4 {
+                                color_bytes[i] = (color_bytes[i] as f32 * coverage).floor() as u8;
+                            }
+                            ((color_bytes[3] as u32) << 24) + ((color_bytes[2] as u32) << 16) + ((color_bytes[1] as u32) << 8) + (color_bytes[0] as u32)
+                        };
+
+                        // config color: rgb 0000rrrrggggbbbbbbbbb
+
+                        let pixel_font = mul_color(add_opacity(config.font.color, 255), v);
+                        let pixel_bg = mul_color(add_opacity(config.window.background_color, percentage_to_u8(config.window.background_opacity)), 1.0 - v);
+                        let pixel = (pixel_font + pixel_bg) as u32;
 
                         canvas[(init_x + x + ((init_y + y) * dimensions.0)) as usize] = pixel;
                         
@@ -309,10 +324,9 @@ fn load_font_and_scale(font_name: String, font_size: f32) -> (Font<'static>, Sca
         panic!( "error constructing a Font from data at");
     });
     
-    let px_font = font_size * ( 72.0 / 96.0 );
-    //let height: f32 = px_font; // to get 80 chars across (fits most terminals); adjust as desired
+    let px_font = font_size * 96.0 / 72.0;
                             
-    let scale = Scale::uniform(font_size);
+    let scale = Scale::uniform(px_font);
 
     (font, scale)
 }
@@ -322,8 +336,9 @@ fn set_backgorund (config: Rc<Config>, canvas_vec: &mut Vec<u32>, dimensions: (u
     // possibly draw also the border line!!!
     
     //let pixel = config.window.background_color.to_ne_bytes();
-    let trasparency = percentage_to_u8(config.window.background_transparency);
-    let pixel = add_trasparency(config.window.background_color, trasparency);
+    let opacity = percentage_to_u8(config.window.background_opacity);
+    let pixel = add_opacity(config.window.background_color, opacity);
+    //let pixel = config.window.background_color;
     for _ in 0..dimensions.1 {
         for _ in 0..dimensions.0 {
             canvas_vec.push(pixel);
@@ -343,7 +358,7 @@ fn to_pixel(r: u8, g: u8, b: u8, t: u8) -> [u8; 4] {
     (((t as u32) << 24) + ((r as u32) << 16) + ((g as u32) << 8) + (b as u32)).to_ne_bytes()
 }
 
-fn add_trasparency(color: u32, transparency: u8) -> u32 {
+fn add_opacity(color: u32, transparency: u8) -> u32 {
     ((transparency as u32) << 24 ) + color
 }
 

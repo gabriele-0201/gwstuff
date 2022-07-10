@@ -11,7 +11,7 @@ MVP:
 + [x] text from line arguments
 + [x] Line text alignment
 + [x] General style
-    + [ ] Config file parser
+    + [x] Config file parser
         + [x] bg_color
         + [x] bg_trasparency
         + [x] padding
@@ -20,7 +20,9 @@ MVP:
         + [x] font_size
         + [x] font_color
         + [x] intra_line_space
-+ [ ] Font Proper Scaling
++ [x] Font Proper Scaling
++ [ ] Timer
++ [ ] Click to exit
 
 Future: 
 + [ ] layer render only on specified screen

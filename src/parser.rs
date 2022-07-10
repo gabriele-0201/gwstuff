@@ -43,13 +43,12 @@ pub enum TextAlignment {
 
 #[derive(Debug, Deserialize)]
 pub struct WindowProps{
-    pub width: u32,
-    pub height: u32,
     pub background_color: u32,
+    pub background_transparency: u32,
     win_position_str: String,
-    pub win_position: (Placement, Placement),
     pub vertical_padding: u32,
-    pub horizontal_padding: u32
+    pub horizontal_padding: u32,
+    pub win_position: Option<(Placement, Placement)>,
 
 }
 impl WindowProps{
@@ -76,7 +75,7 @@ impl WindowProps{
             }
         });
 
-        self.win_position = full_placement.clone();
+        self.win_position = Some(full_placement.clone());
     }
 }
 

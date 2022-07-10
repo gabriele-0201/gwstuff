@@ -3,6 +3,8 @@ width  = '600'
 height = '600'
 background_color = '0x262626'
 win_position = 'CENTER_VERTICAL, CENTER_HORIZONTAL'
+background_transparency = 0
+
 
 [margins]
 vertical_percentage   = '10'

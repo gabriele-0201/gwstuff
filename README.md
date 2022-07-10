@@ -22,7 +22,6 @@ MVP:
         + [x] intra_line_space
 + [x] Font Proper Scaling
 + [ ] Timer
-+ [ ] Click to exit
 
 Future: 
 + [ ] layer render only on specified screen

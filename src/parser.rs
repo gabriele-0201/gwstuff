@@ -101,6 +101,7 @@ static DEFAULT_CONFIG: &str = r#"
         width  = 600
         height = 600
         background_color = 0x262626
+        background_transparency = 80
 
         # Possible values are {CenterVertical, CenterHorizontal, Top, Bottom, Left, Right}
         win_position_str = 'Top, Left'
@@ -114,9 +115,10 @@ static DEFAULT_CONFIG: &str = r#"
 
         [font]
         name  = 'Roboto Condensed'
-        size  = 15
+        size  = 30
         color = 0x808080
-        #intra_line = 1.0
+        intra_line = 1.0
+        text_alignment = 'Center'
     "#;
 
 

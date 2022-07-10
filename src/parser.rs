@@ -49,7 +49,7 @@ pub struct WindowProps{
     pub vertical_padding: u32,
     pub horizontal_padding: u32,
     pub win_position: Option<(Placement, Placement)>,
-
+    pub duration: u32,
 }
 impl WindowProps{
     pub fn calc_win_position(&mut self) {
@@ -108,6 +108,9 @@ static DEFAULT_CONFIG: &str = r#"
 
         vertical_padding   = 5
         horizontal_padding = 5
+
+        # milliseconds                        
+        duration = 5000 
 
         [margins]
         vertical_percentage   = 5

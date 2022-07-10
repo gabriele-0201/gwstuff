@@ -21,7 +21,7 @@ MVP:
         + [x] font_color
         + [x] intra_line_space
 + [x] Font Proper Scaling
-+ [ ] Timer
++ [x] Timer - SORT OF - not really beautifull
 
 Future: 
 + [ ] layer render only on specified screen

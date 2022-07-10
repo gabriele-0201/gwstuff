@@ -101,10 +101,10 @@ static DEFAULT_CONFIG: &str = r#"
         width  = 600
         height = 600
         background_color = 0x262626
-        background_transparency = 80
+        background_opacity= 80
 
         # Possible values are {CenterVertical, CenterHorizontal, Top, Bottom, Left, Right}
-        win_position_str = 'Top, Left'
+        win_position_str = 'CenterVertical, CenterHorizontal'
 
         vertical_padding   = 5
         horizontal_padding = 5

@@ -1,0 +1,20 @@
+[window]
+width  = 600
+height = 600
+background_color = 0x262626
+
+# Possible values are {CenterVertical, CenterHorizontal, Top, Bottom, Left, Right}
+win_position_str = 'Top, Left'
+
+vertical_padding   = 5
+horizontal_padding = 5
+
+[margins]
+vertical_percentage   = 5
+horizontal_percentage = 5
+
+[font]
+name  = 'Roboto Condensed'
+size  = 15
+color = 0x808080
+#intra_line = 1.0

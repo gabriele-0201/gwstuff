@@ -43,14 +43,13 @@ pub enum TextAlignment {
 
 #[derive(Debug, Deserialize)]
 pub struct WindowProps{
-    pub width: u32,
-    pub height: u32,
     pub background_color: u32,
+    pub background_opacity: u32,
     win_position_str: String,
-    pub win_position: (Placement, Placement),
     pub vertical_padding: u32,
-    pub horizontal_padding: u32
-
+    pub horizontal_padding: u32,
+    pub win_position: Option<(Placement, Placement)>,
+    pub duration: u32,
 }
 impl WindowProps{
     pub fn calc_win_position(&mut self) {
@@ -76,7 +75,7 @@ impl WindowProps{
             }
         });
 
-        self.win_position = full_placement.clone();
+        self.win_position = Some(full_placement.clone());
     }
 }
 
@@ -102,12 +101,16 @@ static DEFAULT_CONFIG: &str = r#"
         width  = 600
         height = 600
         background_color = 0x262626
+        background_opacity= 80
 
         # Possible values are {CenterVertical, CenterHorizontal, Top, Bottom, Left, Right}
-        win_position_str = 'Top, Left'
+        win_position_str = 'CenterVertical, CenterHorizontal'
 
         vertical_padding   = 5
         horizontal_padding = 5
+
+        # milliseconds                        
+        duration = 5000 
 
         [margins]
         vertical_percentage   = 5
@@ -115,9 +118,10 @@ static DEFAULT_CONFIG: &str = r#"
 
         [font]
         name  = 'Roboto Condensed'
-        size  = 15
+        size  = 30
         color = 0x808080
-        #intra_line = 1.0
+        intra_line = 1.0
+        text_alignment = 'Center'
     "#;
 
 

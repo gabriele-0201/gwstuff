@@ -6,7 +6,7 @@ use smithay_client_toolkit::{
     new_default_environment,
     output::{with_output_info, OutputInfo},
     reexports::{
-        calloop,
+        calloop::{timer::Timer, EventLoop, LoopSignal},
         client::protocol::{wl_output, wl_shm, wl_surface},
         client::{Attached, Main},
         protocols::wlr::unstable::layer_shell::v1::client::{
@@ -47,18 +47,16 @@ enum RenderEvent {
     Closed,
 }
 
-struct Surface<'a> {
+struct Surface {
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    config: Rc<Config>,
-    font_and_scale: (Rc<Font<'a>>, Scale),
-    text_and_width: Vec<(Vec<PositionedGlyph<'a>>, u32)>
+    vec_canvas: Vec<u32>
 }
 
-impl<'a> Surface<'a>{
+impl Surface {
     fn new(
         //output: &wl_output::WlOutput,
         surface: wl_surface::WlSurface,
@@ -78,58 +76,11 @@ impl<'a> Surface<'a>{
         );
 
         // Calc window dimensions and get glyphs alread positioned
+        let ((win_w, win_h), vec_canvas) = get_dimensions_and_canvas(Rc::clone(&config), &text);
         
-        let (font, scale) = load_font_and_scale(config.font.name.clone(), config.font.size);
-        let font = Rc::new(font);
+        layer_surface.set_size(win_w, win_h);
 
-        let mut text_glyphs_and_width: Vec<(Vec<PositionedGlyph>, u32)> = Vec::new();
-        //let (win_width, win_height) = get_dimensions_and_glyphs((Rc::clone(&font), &scale), Rc::clone(&config), &text, Rc::clone(&text_glyphs_and_width));
-        
-        // BAH
-        //let config = &config.borrow();
-        let v_metrics = font.v_metrics(scale);
-
-        //let text_glyphs_and_width: Rc<RefCell<Vec<(Vec<PositionedGlyph>, u32)>>> = Rc::new(RefCell::new(Vec::new()));
-
-        let mut win_h: f32 = 0.0;
-        let mut win_w: u32 = 0;
-
-        for (index, line) in text.iter().enumerate() {
-
-            let layout_iter: rusttype::LayoutIter = font.layout(line, scale, point(0.0, v_metrics.ascent));
-            //let glyphs: Box<Vec<PositionedGlyph>> = Box::new(layout_iter.collect());
-            let glyphs: Vec<PositionedGlyph> = layout_iter.collect();
-
-            //let glyphs: Vec<_> = font.layout(line, scale, point(0.0, v_metrics.ascent)).collect();
-            
-            // Find the most visually pleasing width to display
-            //let width_line = text_glyphs_and_width.borrow().last().unwrap().0
-            let width_line = glyphs
-                .iter()
-                .rev()
-                .map(|g| g.position().x as f32 + g.unpositioned().h_metrics().advance_width)
-                .next()
-                .unwrap_or(0.0)
-                .ceil() as usize;
-
-            text_glyphs_and_width.push((glyphs, width_line as u32));
-
-            if width_line as u32 > win_w {
-                win_w = width_line as u32;
-            }
-
-            win_h += scale.y;
-
-            if index != 0 && index != text.len() {
-                win_h += config.font.intra_line;
-            }
-        }
-        let (win_width, win_height) = (win_w, win_h.ceil() as u32);
-        // finish function
-        
-        layer_surface.set_size(win_w, win_h.ceil() as u32);
-
-        let anchor = zwlr_layer_surface_v1::Anchor::from_raw(config.window.win_position.0.to_raw() | config.window.win_position.1.to_raw()).unwrap();
+        let anchor = zwlr_layer_surface_v1::Anchor::from_raw(config.window.win_position.unwrap().0.to_raw() | config.window.win_position.unwrap().1.to_raw()).unwrap();
 
         if !anchor.contains(zwlr_layer_surface_v1::Anchor::from_raw(15).unwrap()) {
 
@@ -178,10 +129,9 @@ impl<'a> Surface<'a>{
             layer_surface, 
             next_render_event, 
             pool, 
-            dimensions: (win_width, win_height), 
-            config: Rc::clone(&config), 
-            font_and_scale: (Rc::clone(&font), scale),
-            text_and_width: text_glyphs_and_width
+            //dimensions: (win_w, win_h), 
+            dimensions: (0, 0), 
+            vec_canvas
         }
     }
 
@@ -213,13 +163,23 @@ impl<'a> Surface<'a>{
         let (canvas, buffer) =
             self.pool.buffer(width, height, stride, wl_shm::Format::Argb8888).unwrap();
 
-        set_backgorund(canvas, self.config.window.background_color);
 
         //draw_line(canvas, (width as u32, height as u32), (50, 10), (100, 200), 2, (155, 0, 0));
 
-        draw_text(canvas, &self.config, &self.text_and_width, &self.dimensions);
+        for (index, color) in self.vec_canvas.iter().enumerate() {
 
-        //draw_text(canvas, (&mut x_init, &mut y_init), &font, 14.0, &text, 0.0, 5.0, (height as u32, width as u32));
+
+            let pixel = color.to_ne_bytes();
+            let pixel_canvas = canvas.chunks_exact_mut(4).nth(index).unwrap();
+
+            pixel_canvas[0] = pixel[0];
+            pixel_canvas[1] = pixel[1];
+            pixel_canvas[2] = pixel[2];
+            pixel_canvas[3] = pixel[3];
+        }
+
+        // here I should place the canvas_vec into the canvas
+
 
         // Attach the buffer to the surface and mark the entire surface as damaged
         self.surface.attach(Some(&buffer), 0, 0);
@@ -230,26 +190,30 @@ impl<'a> Surface<'a>{
     }
 }
 
-fn draw_text(canvas : &mut [u8], config: &Config, text_and_width: &Vec<(Vec<PositionedGlyph>, u32)>, dimensions: &(u32, u32)) {
+fn get_canvas(config: Rc<Config>, text_and_width: &Vec<(Vec<PositionedGlyph>, u32)>, dimensions: (u32, u32)) -> Vec<u32> {
 
-    let pixel = config.font.color.to_ne_bytes();
+    let mut canvas: Vec<u32> = Vec::new();
+    set_backgorund(Rc::clone(&config), &mut canvas, dimensions);
+
+    //let pixel = config.font.color.to_ne_bytes();
 
     let dim_y = text_and_width[0].0[0].scale().y as u32;
     let mut init_x: u32;
-    let mut init_y: u32;
-
-    match config.font.text_alignment {
-        parser::TextAlignment::Center => {
-            init_x = config.window.horizontal_padding;
-            init_y = config.window.vertical_padding;
-        },
-        _ => {
-            init_x = 0;
-            init_y = 0;
-        }
-    }
+    let mut init_y: u32 = config.window.vertical_padding;
 
     for (glyphs, width_line) in text_and_width.iter() {
+
+        match config.font.text_alignment {
+            parser::TextAlignment::Left => {
+                init_x = config.window.horizontal_padding;
+            },
+            parser::TextAlignment::Right => {
+                init_x = dimensions.0 - config.window.horizontal_padding - width_line;
+            },
+            parser::TextAlignment::Center => {
+                init_x = (dimensions.0 / 2) - (width_line / 2);
+            }
+        }
 
         for g in glyphs.iter() {
             if let Some(bb) = g.pixel_bounding_box() {
@@ -259,33 +223,53 @@ fn draw_text(canvas : &mut [u8], config: &Config, text_and_width: &Vec<(Vec<Posi
                     let x = x as i32 + bb.min.x;
                     let y = y as i32 + bb.min.y;
                     // There's still a possibility that the glyph clips the boundaries of the bitmap
-                    if /*x >= 0 && x < *width_line as i32 && y >= 0 && y < scale.y as i32 &&*/ v >= 0.01 {
-                        /*
-                        let x = x as usize;
-                        let y = y as usize;
-                        */
+                    if x >= 0 && x < *width_line as i32 && y >= 0 && y < dim_y as i32 /*&& v >= 0.1*/ {
                         let x = x as u32;
                         let y = y as u32;
+                        
+                        //let pixel = add_opacity(config.font.color, 0);
+                        //println!("{}", (v * 255.0).floor() as u8);
+                        //let pixel = add_opacity(config.font.color, (v * 255.0).floor() as u8);
+                        //
+                        let mul_color = |color: u32, coverage: f32| -> u32 {
 
+                            let mut color_bytes = color.to_ne_bytes();
+                            for i in 0..4 {
+                                color_bytes[i] = (color_bytes[i] as f32 * coverage).floor() as u8;
+                            }
+                            ((color_bytes[3] as u32) << 24) + ((color_bytes[2] as u32) << 16) + ((color_bytes[1] as u32) << 8) + (color_bytes[0] as u32)
+                        };
+
+                        // config color: rgb 0000rrrrggggbbbbbbbbb
+
+                        let pixel_font = mul_color(add_opacity(config.font.color, 255), v);
+                        let pixel_bg = mul_color(add_opacity(config.window.background_color, percentage_to_u8(config.window.background_opacity)), 1.0 - v);
+                        let pixel = (pixel_font + pixel_bg) as u32;
+
+                        canvas[(init_x + x + ((init_y + y) * dimensions.0)) as usize] = pixel;
+                        
+                        /*
                         let pixel_canvas = canvas.chunks_exact_mut(4).nth((init_x + x + ((init_y + y) * dimensions.0)) as usize).unwrap();
 
                         pixel_canvas[0] = pixel[0];
                         pixel_canvas[1] = pixel[1];
                         pixel_canvas[2] = pixel[2];
                         pixel_canvas[3] = pixel[3];
+                        */
                     }
                 })
             }
         }
         init_y += (config.font.intra_line as u32) + dim_y;
     }
+    canvas
 }
 
-/*
-fn get_dimensions_and_glyphs<'a> (font_and_scale: (Rc<Font<'a>>, &Scale), config: Rc<Config>, text: &Vec<String>, text_glyphs_and_width: Rc<RefCell<Vec<(Vec<PositionedGlyph<'a>>, u32)>>>) -> (u32, u32) /*-> ((u32, u32), Rc<RefCell<Vec<(Box<Vec<PositionedGlyph<'a>>, u32)>>>)*/ {
+fn get_dimensions_and_canvas(config: Rc<Config>, text: &Vec<String>) -> ((u32, u32), Vec<u32>) {
 
-    //let config = &config.borrow();
-    let (font, scale) = (font_and_scale.0, *font_and_scale.1);
+    let (font, scale) = load_font_and_scale(config.font.name.clone(), config.font.size);
+
+    let mut text_glyphs_and_width: Vec<(Vec<PositionedGlyph>, u32)> = Vec::new();
 
     let v_metrics = font.v_metrics(scale);
 
@@ -297,13 +281,9 @@ fn get_dimensions_and_glyphs<'a> (font_and_scale: (Rc<Font<'a>>, &Scale), config
     for (index, line) in text.iter().enumerate() {
 
         let layout_iter: rusttype::LayoutIter = font.layout(line, scale, point(0.0, v_metrics.ascent));
-        //let glyphs: Box<Vec<PositionedGlyph>> = Box::new(layout_iter.collect());
         let glyphs: Vec<PositionedGlyph> = layout_iter.collect();
 
-        //let glyphs: Vec<_> = font.layout(line, scale, point(0.0, v_metrics.ascent)).collect();
-        
         // Find the most visually pleasing width to display
-        //let width_line = text_glyphs_and_width.borrow().last().unwrap().0
         let width_line = glyphs
             .iter()
             .rev()
@@ -312,7 +292,7 @@ fn get_dimensions_and_glyphs<'a> (font_and_scale: (Rc<Font<'a>>, &Scale), config
             .unwrap_or(0.0)
             .ceil() as usize;
 
-        text_glyphs_and_width.borrow_mut().push((glyphs, width_line as u32));
+        text_glyphs_and_width.push((glyphs, width_line as u32));
 
         if width_line as u32 > win_w {
             win_w = width_line as u32;
@@ -325,51 +305,54 @@ fn get_dimensions_and_glyphs<'a> (font_and_scale: (Rc<Font<'a>>, &Scale), config
         }
     }
 
+    win_w += 2 * config.window.horizontal_padding;
+    win_h += (2 * config.window.vertical_padding) as f32;
+
     //((win_w, win_h.ceil() as u32), Rc::clone(&text_glyphs_and_width))
-    (win_w, win_h.ceil() as u32) 
+    ((win_w, win_h.ceil() as u32), get_canvas(Rc::clone(&config), &text_glyphs_and_width, (win_w, win_h.ceil() as u32))) 
 }
-*/
 
-
-// TODO calc properly scale - and font type
+// FONT LOAD + SCALE DIMENSION -> TODO properly
 fn load_font_and_scale(font_name: String, font_size: f32) -> (Font<'static>, Scale) {
     
     // LOAD FONT
     let property = system_fonts::FontPropertyBuilder::new().family(&font_name[..]).build();
     let (font_data, _) = system_fonts::get(&property).unwrap();
     
-    // TEST RUSTTYPE
+    // RUSTTYPE
     let font = Font::try_from_vec(font_data).unwrap_or_else(|| {
         panic!( "error constructing a Font from data at");
     });
     
-    // FONT LOAD + SCALE DIMENSION
-    /*
-    let px_font = (font_size / 72.0) * 96.0;
-    let height: f32 = px_font; // to get 80 chars across (fits most terminals); adjust as desired
-    */
+    let px_font = font_size * 96.0 / 72.0;
                             
-    let scale = Scale::uniform(font_size);
+    let scale = Scale::uniform(px_font);
 
     (font, scale)
 }
 
-fn set_backgorund (canvas : &mut [u8], color: u32) {
+fn set_backgorund (config: Rc<Config>, canvas_vec: &mut Vec<u32>, dimensions: (u32, u32)) {
 
-    // possibly draw also the border line!!!
-    
-    let pixel = color.to_ne_bytes();
-    for dst_pixel in canvas.chunks_exact_mut(4) {
-        dst_pixel[0] = pixel[0];
-        dst_pixel[1] = pixel[1];
-        dst_pixel[2] = pixel[2];
-        dst_pixel[3] = pixel[3];
+    let opacity = percentage_to_u8(config.window.background_opacity);
+    let pixel = add_opacity(config.window.background_color, opacity);
+    for _ in 0..dimensions.1 {
+        for _ in 0..dimensions.0 {
+            canvas_vec.push(pixel);
+        }
     }
-    
+
 }
 
 fn to_pixel(r: u8, g: u8, b: u8, t: u8) -> [u8; 4] {
     (((t as u32) << 24) + ((r as u32) << 16) + ((g as u32) << 8) + (b as u32)).to_ne_bytes()
+}
+
+fn add_opacity(color: u32, transparency: u8) -> u32 {
+    ((transparency as u32) << 24 ) + color
+}
+
+fn percentage_to_u8(t: u32) -> u8 {
+    ((t * 255) / 100) as u8
 }
 
 fn length ((x, y): (f32, f32)) -> f32 {
@@ -444,7 +427,7 @@ fn draw_line(canvas : &mut [u8], (buf_x, buf_y): (u32, u32), (x_init, y_init): (
 }
 */
 
-impl Drop for Surface<'_> {
+impl Drop for Surface {
     fn drop(&mut self) {
         self.layer_surface.destroy();
         self.surface.destroy();
@@ -462,8 +445,6 @@ fn main() {
         return;
     }
 
-    println!("{}", args[0][..2].to_string());
-
     let config_name: Option<String> = match args[0][..2] == "--".to_owned() {
         true => {
             let name = args[0][2..].to_string();
@@ -474,6 +455,7 @@ fn main() {
     };
 
     let gwstuff_config: Rc<Config> = Rc::new(parser::init_toml_config(config_name));
+    let duration_timer = gwstuff_config.window.duration as u64;
 
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
@@ -534,7 +516,63 @@ fn main() {
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
-    let mut event_loop = calloop::EventLoop::<()>::try_new().unwrap();
+    // Create the event loop. The loop is parameterised by the kind of shared
+    // data you want the callbacks to use. In this case, we want to be able to
+    // stop the loop when the timer fires, so we provide the loop with a
+    // LoopSignal, which has the ability to stop the loop from within events. We
+    // just annotate the type here; the actual data is provided later in the
+    // run() call.
+    let mut event_loop: EventLoop<LoopSignal> =
+        EventLoop::try_new().expect("Failed to initialize the event loop!");
+
+    // Retrieve a handle. It is used to insert new sources into the event loop
+    // It can be cloned, allowing you to insert sources from within source
+    // callbacks.
+    let handle = event_loop.handle();
+
+    // Create our event source, a timer. Note that this is also parameterised by
+    // the data for the events it generates. We've let Rust infer that here.
+    let source = Timer::new().expect("Failed to create timer event source!");
+
+    // Most event source APIs provide two things: an event source to go into the
+    // event loop, and some way of triggering that source from elsewhere. In
+    // this case, we use a handle to the timer to set timeouts.
+    //
+    // Note that this can go before or after the call to insert_source(), and
+    // even inside another event callback.
+    let timer_handle = source.handle();
+    timer_handle.add_timeout(std::time::Duration::from_millis(duration_timer), "Timeout reached!");
+
+    let timer_occured: Rc<RefCell<bool>> = Rc::new(RefCell::new(false)); 
+    let closure_timer = Rc::clone(&timer_occured);
+
+    // Inserting an event source takes this general form. It can also be done
+    // from within the callback of another event source.
+    handle
+        .insert_source(
+            // a type which implements the EventSource trait
+            source,
+            // a callback that is invoked whenever this source generates an event
+            move |_event, _metadata, shared_data| {
+                // This callback is given 3 values:
+                // - the event generated by the source (in our case, a string slice)
+                // - &mut access to some metadata, specific to the event source (in our case, a
+                //   timer handle)
+                // - &mut access to the global shared data that was passed to EventLoop::run or
+                //   EventLoop::dispatch (in our case, a LoopSignal object to stop the loop)
+                //
+                // The return type is just () because nothing uses it. Some
+                // sources will expect a Result of some kind instead.
+
+                //println!("Event fired: {}", event);
+                *closure_timer.borrow_mut() = true;
+                shared_data.stop();
+            },
+        )
+        .expect("Failed to insert event source!");
+
+    // Create the shared data for our loop. 
+    let mut shared_data = event_loop.get_signal();
 
     WaylandSource::new(queue).quick_insert(event_loop.handle()).unwrap();
 
@@ -554,7 +592,11 @@ fn main() {
         }
 
         display.flush().unwrap();
-        event_loop.dispatch(None, &mut ()).unwrap();
+        //event_loop.dispatch(None, &mut ()).unwrap();
+        event_loop.dispatch(None, &mut shared_data).unwrap();
+
+        if *timer_occured.borrow() {
+            break;
+        }
     }
 }
-

@@ -1,6 +1,6 @@
 # GWSTUFF
 
-...
+https://docs.rs/smithay-client-toolkit/0.15.4/smithay_client_toolkit/index.html
 
 ## RoadMap
 
@@ -21,7 +21,9 @@ MVP:
         + [x] font_color
         + [x] intra_line_space
 + [x] Font Proper Scaling
-+ [x] Timer - SORT OF - not really beautifull
++ [x] Timer - SORT OF - not really beautiful
+=======
++ [x] Duration
 
 Future: 
 + [ ] layer render only on specified screen

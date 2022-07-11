@@ -2,6 +2,8 @@
 
 ...
 
+https://docs.rs/smithay-client-toolkit/0.15.4/smithay_client_toolkit/index.html
+
 ## RoadMap
 
 MVP: 

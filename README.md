@@ -103,7 +103,9 @@ Gwstuff is a deamon-less lightweight notification program for Wayland compositor
 ### Prerequisites
 
 In order to use gwstuff you should be running a **Wayland compositor** (like Sway, GNOME, KDE, ...).
+
 You will also need [fontconfig](https://www.freedesktop.org/wiki/Software/fontconfig/)
+
 To compile gwstuff from source you should have **rustc** and **cargo** installed
 
 

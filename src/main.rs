@@ -516,17 +516,12 @@ fn main() {
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
-    //let mut event_loop = EventLoop::<()>::try_new().unwrap();
-
-    // START
-
     // Create the event loop. The loop is parameterised by the kind of shared
     // data you want the callbacks to use. In this case, we want to be able to
     // stop the loop when the timer fires, so we provide the loop with a
     // LoopSignal, which has the ability to stop the loop from within events. We
     // just annotate the type here; the actual data is provided later in the
     // run() call.
-
     let mut event_loop: EventLoop<LoopSignal> =
         EventLoop::try_new().expect("Failed to initialize the event loop!");
 
@@ -578,7 +573,6 @@ fn main() {
 
     // Create the shared data for our loop. 
     let mut shared_data = event_loop.get_signal();
-    // FINISH
 
     WaylandSource::new(queue).quick_insert(event_loop.handle()).unwrap();
 
